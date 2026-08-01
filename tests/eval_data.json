@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "document": "memoria.pdf",
+    "document_filename": "memoria.pdf",
+    "version": "1.0",
+    "created": "2026-08-01",
+    "description": "Grounded evaluation dataset for the contract-management monograph already indexed in the workspace."
+  },
+  "eval_cases": [
+    {
+      "id": 1,
+      "question": "Qual é o objetivo principal do relatório sobre gestão de contratos?",
+      "expected_keywords": ["sistema", "gestão", "contrato", "empresa", "implementação"],
+      "expected_pages": [5, 10],
+      "difficulty": "easy",
+      "notes": "Valida se o sistema recupera a introdução e o enquadramento geral do relatório."
+    },
+    {
+      "id": 2,
+      "question": "Como funciona o workflow de contratos e que elementos operacionais são mencionados?",
+      "expected_keywords": ["projeto", "contratos", "terceiros", "faturas", "recibos"],
+      "expected_pages": [15],
+      "difficulty": "medium",
+      "notes": "Deve puxar a descrição operacional do processo e as entidades envolvidas."
+    },
+    {
+      "id": 3,
+      "question": "Que problemas a solução proposta pretende resolver na gestão contratual?",
+      "expected_keywords": ["tempo", "documentos", "relatórios", "base de dados", "automatização"],
+      "expected_pages": [20],
+      "difficulty": "medium",
+      "notes": "Verifica se a recuperação chega à secção de proposta vs problemas."
+    },
+    {
+      "id": 4,
+      "question": "Que funcionalidades são atribuídas ao módulo de gestão de projeto e contratos?",
+      "expected_keywords": ["dashboard", "projeto", "contratos", "orçamento", "estado"],
+      "expected_pages": [35],
+      "difficulty": "medium",
+      "notes": "Mede a capacidade de recuperar requisitos funcionais específicos."
+    },
+    {
+      "id": 5,
+      "question": "Que mecanismos de segurança e controlo de acesso são exigidos no sistema?",
+      "expected_keywords": ["utilizador", "permissões", "log", "segurança", "acesso"],
+      "expected_pages": [30, 40],
+      "difficulty": "hard",
+      "notes": "Valida a recuperação de requisitos de segurança e auditoria."
+    }
+  ],
+  "metrics": {
+    "answer_depth": {
+      "description": "How detailed and comprehensive is the answer (1-5)",
+      "threshold": 3
+    },
+    "grounding": {
+      "description": "Does answer cite sources and stay within context (0-1)",
+      "threshold": 0.8
+    },
+    "relevance": {
+      "description": "How relevant are retrieved chunks to query (0-1)",
+      "threshold": 0.7
+    }
+  }
+}
