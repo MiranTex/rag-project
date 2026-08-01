@@ -13,14 +13,14 @@ class LMStudioClient:
         response = requests.get(f"{self.base_url}/models", timeout=5)
         return response.ok
 
-    def chat(self, system_prompt: str, user_prompt: str) -> str:
+    def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> str:
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.2,
+            "temperature": temperature,
         }
         response = requests.post(
             f"{self.base_url}/chat/completions",
@@ -31,14 +31,14 @@ class LMStudioClient:
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()
 
-    def chat_stream(self, system_prompt: str, user_prompt: str) -> Iterator[str]:
+    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> Iterator[str]:
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.2,
+            "temperature": temperature,
             "stream": True,
         }
         response = requests.post(

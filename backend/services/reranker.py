@@ -1,15 +1,10 @@
-"""
-Advanced re-ranking strategies for RAG retrieval candidates.
+"""Advanced re-ranking strategies for RAG retrieval candidates."""
 
-This module implements multiple re-ranking approaches to improve chunk selection
-quality beyond simple vector similarity scoring.
-"""
-
-import re
 from dataclasses import dataclass
 from typing import Sequence
 
 from backend.models import SourceChunk
+from backend.services.text_processing import tokenize_text_set
 
 
 @dataclass
@@ -21,16 +16,13 @@ class RankingScores:
     density_score: float
     recency_boost: float
     final_score: float
+    lexical_score: float = 0.0
 
 
 def _compute_keyword_overlap(question_text: str, chunk_text: str) -> float:
     """Compute keyword overlap bonus (0-1 scale)."""
-    question_tokens = {
-        token for token in re.findall(r"[a-zA-ZÀ-ÿ0-9]+", question_text.lower()) if token
-    }
-    chunk_tokens = {
-        token for token in re.findall(r"[a-zA-ZÀ-ÿ0-9]+", chunk_text.lower()) if token
-    }
+    question_tokens = tokenize_text_set(question_text)
+    chunk_tokens = tokenize_text_set(chunk_text)
     
     if not question_tokens:
         return 0.0
@@ -65,6 +57,8 @@ def _compute_text_density(chunk_text: str) -> float:
     - Low token count + high punctuation = summary/list (score: 1.0)
     Returns a density score (0.6-1.0).
     """
+    import re
+
     tokens = len(re.findall(r"[a-zA-ZÀ-ÿ0-9]+", chunk_text))
     punctuation = len(re.findall(r"[.!?;:,—-]", chunk_text))
     
@@ -84,7 +78,7 @@ def _compute_text_density(chunk_text: str) -> float:
 
 def rerank_hybrid(
     question: str,
-    candidates: Sequence[tuple[SourceChunk, float]],
+    candidates: Sequence[tuple],
     weights: dict | None = None,
 ) -> Sequence[tuple[SourceChunk, RankingScores]]:
     """
@@ -103,6 +97,7 @@ def rerank_hybrid(
     if not weights:
         weights = {
             'vector': 0.6,
+            'lexical': 0.0,
             'keyword': 0.25,
             'position': 0.1,
             'density': 0.05,
@@ -111,7 +106,12 @@ def rerank_hybrid(
     total_candidates = len(candidates)
     scored = []
     
-    for chunk, vector_score in candidates:
+    for candidate in candidates:
+        if len(candidate) == 2:
+            chunk, vector_score = candidate
+            lexical_score = getattr(chunk, "lexical_score", 0.0)
+        else:
+            chunk, vector_score, lexical_score = candidate
         keyword_score = _compute_keyword_overlap(question, chunk.text)
         document_chunk_count = chunk.document_chunk_count or total_candidates
         position_mult = _compute_position_penalty(
@@ -126,14 +126,16 @@ def rerank_hybrid(
         
         # Compute weighted final score
         final = (
-            weights['vector'] * vector_score +
-            weights['keyword'] * keyword_score +
-            weights['position'] * position_mult +
-            weights['density'] * density_score
+            weights.get('vector', 0.0) * vector_score +
+            weights.get('lexical', 0.0) * lexical_score +
+            weights.get('keyword', 0.0) * keyword_score +
+            weights.get('position', 0.0) * position_mult +
+            weights.get('density', 0.0) * density_score
         ) * recency_boost
         
         scores = RankingScores(
             vector_score=vector_score,
+            lexical_score=lexical_score,
             keyword_overlap=keyword_score,
             position_penalty=position_mult,
             density_score=density_score,
@@ -151,6 +153,7 @@ def rerank_hybrid(
 def scores_to_dict(scores: RankingScores) -> dict[str, float]:
     return {
         "vector_score": scores.vector_score,
+        "lexical_score": scores.lexical_score,
         "keyword_overlap": scores.keyword_overlap,
         "position_penalty": scores.position_penalty,
         "density_score": scores.density_score,
@@ -163,6 +166,7 @@ def format_ranking_explanation(scores: RankingScores) -> str:
     """Format ranking scores for debugging/logging."""
     return (
         f"vector={scores.vector_score:.3f} "
+        f"lexical={scores.lexical_score:.3f} "
         f"keyword={scores.keyword_overlap:.3f} "
         f"position={scores.position_penalty:.3f} "
         f"density={scores.density_score:.3f} "

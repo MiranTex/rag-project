@@ -31,6 +31,22 @@ class VectorStore:
     def delete_document(self, document_id: str) -> None:
         self.collection.delete(where={"document_id": document_id})
 
+    def list_chunks(self, document_id: str | None = None) -> list[dict]:
+        where = {"document_id": document_id} if document_id else None
+        result = self.collection.get(where=where, include=["metadatas", "documents"])
+
+        items: list[dict] = []
+        docs = result.get("documents", [])
+        metas = result.get("metadatas", [])
+        for doc, meta in zip(docs, metas, strict=False):
+            items.append(
+                {
+                    "text": doc,
+                    "metadata": meta,
+                }
+            )
+        return items
+
     def query(
         self,
         query_embedding: list[float],

@@ -1,4 +1,5 @@
 from backend.services.rag_pipeline import RagPipeline, build_answer_prompt, score_candidate
+from backend.services.keyword_index import KeywordIndex
 
 
 def test_hybrid_score_prefers_keyword_overlap() -> None:
@@ -58,12 +59,46 @@ class _FakeLMStudioClient:
     def chat(self, system_prompt: str, user_prompt: str) -> str:
         return "ok"
 
+    def chat_stream(self, system_prompt: str, user_prompt: str):
+        yield "ok"
+
+
+def _build_keyword_index() -> KeywordIndex:
+    index = KeywordIndex()
+    index.index_document(
+        "doc-1",
+        [
+            {
+                "text": "Trecho genérico sem muita relação com a pergunta.",
+                "metadata": {
+                    "document_id": "doc-1",
+                    "filename": "memoria.pdf",
+                    "page": 10,
+                    "chunk_index": 20,
+                    "document_chunk_count": 30,
+                },
+            },
+            {
+                "text": "Resumo sobre gestão de contratos, projetos, orçamento e estado do projeto.",
+                "metadata": {
+                    "document_id": "doc-1",
+                    "filename": "memoria.pdf",
+                    "page": 1,
+                    "chunk_index": 1,
+                    "document_chunk_count": 30,
+                },
+            },
+        ],
+    )
+    return index
+
 
 def test_build_user_prompt_with_debug_returns_diagnostics(monkeypatch) -> None:
     monkeypatch.setattr("backend.services.rag_pipeline.embed_query", lambda model_name, question: [0.1, 0.2])
     pipeline = RagPipeline(
         embedding_model="fake-model",
         vector_store=_FakeVectorStore(),
+        keyword_index=_build_keyword_index(),
         lmstudio_client=_FakeLMStudioClient(),
     )
 
@@ -85,6 +120,7 @@ def test_pipeline_uses_instance_default_rerank_weights(monkeypatch) -> None:
     pipeline = RagPipeline(
         embedding_model="fake-model",
         vector_store=_FakeVectorStore(),
+        keyword_index=_build_keyword_index(),
         lmstudio_client=_FakeLMStudioClient(),
         rerank_weights={"vector": 0.2, "keyword": 0.6, "position": 0.1, "density": 0.1},
     )
@@ -103,8 +139,9 @@ def test_pipeline_allows_per_call_rerank_weight_override(monkeypatch) -> None:
     pipeline = RagPipeline(
         embedding_model="fake-model",
         vector_store=_FakeVectorStore(),
+        keyword_index=_build_keyword_index(),
         lmstudio_client=_FakeLMStudioClient(),
-        rerank_weights={"vector": 0.6, "keyword": 0.25, "position": 0.1, "density": 0.05},
+        rerank_weights={"vector": 0.6, "lexical": 0.0, "keyword": 0.25, "position": 0.1, "density": 0.05},
     )
 
     _, _, default_diag = pipeline.build_user_prompt_with_debug(
@@ -114,8 +151,53 @@ def test_pipeline_allows_per_call_rerank_weight_override(monkeypatch) -> None:
     _, _, override_diag = pipeline.build_user_prompt_with_debug(
         question="gestão de contratos",
         top_k=2,
-        rerank_weights={"vector": 0.1, "keyword": 0.7, "position": 0.1, "density": 0.1},
+        rerank_weights={"vector": 0.1, "lexical": 0.1, "keyword": 0.7, "position": 0.1, "density": 0.1},
     )
 
     assert len(default_diag) == len(override_diag) == 2
     assert any(a.final_score != b.final_score for a, b in zip(default_diag, override_diag, strict=False))
+
+
+def test_keyword_mode_retrieves_relevant_chunk_without_vector_signal(monkeypatch) -> None:
+    monkeypatch.setattr("backend.services.rag_pipeline.embed_query", lambda model_name, question: [0.1, 0.2])
+    pipeline = RagPipeline(
+        embedding_model="fake-model",
+        vector_store=_FakeVectorStore(),
+        keyword_index=_build_keyword_index(),
+        lmstudio_client=_FakeLMStudioClient(),
+        rerank_weights={"vector": 0.0, "lexical": 0.7, "keyword": 0.2, "position": 0.05, "density": 0.05},
+        retrieval_mode_default="hybrid",
+    )
+
+    _, sources, diagnostics = pipeline.build_user_prompt_with_debug(
+        question="gestão de contratos",
+        top_k=2,
+        retrieval_mode="keyword",
+    )
+
+    assert len(sources) == 1
+    assert sources[0].page == 1
+    assert diagnostics[0].lexical_score > 0
+    assert diagnostics[0].retrieval_mode == "keyword"
+
+
+def test_hybrid_mode_emits_lexical_score_in_diagnostics(monkeypatch) -> None:
+    monkeypatch.setattr("backend.services.rag_pipeline.embed_query", lambda model_name, question: [0.1, 0.2])
+    pipeline = RagPipeline(
+        embedding_model="fake-model",
+        vector_store=_FakeVectorStore(),
+        keyword_index=_build_keyword_index(),
+        lmstudio_client=_FakeLMStudioClient(),
+        rerank_weights={"vector": 0.45, "lexical": 0.2, "keyword": 0.2, "position": 0.1, "density": 0.05},
+        retrieval_mode_default="hybrid",
+    )
+
+    _, _, diagnostics = pipeline.build_user_prompt_with_debug(
+        question="gestão de contratos",
+        top_k=2,
+        retrieval_mode="hybrid",
+    )
+
+    assert len(diagnostics) == 2
+    assert all(diag.retrieval_mode == "hybrid" for diag in diagnostics)
+    assert any(diag.lexical_score > 0 for diag in diagnostics)

@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from backend.config import get_settings
-from backend.dependencies import get_registry, get_vector_store
+from backend.dependencies import get_keyword_index, get_registry, get_vector_store
 from backend.models import DocumentInfo, UploadResponse
 from backend.services.embeddings import embed_texts
 from backend.services.pdf_ingestion import (
@@ -26,6 +26,7 @@ def _index_pdf_content(
     settings = get_settings()
     registry = get_registry()
     vector_store = get_vector_store()
+    keyword_index = get_keyword_index()
 
     saved_path = save_uploaded_file(settings.upload_dir, filename, raw)
     pages = extract_pages(saved_path)
@@ -49,16 +50,17 @@ def _index_pdf_content(
     vector_store.delete_document(document_id)
 
     metadatas: list[dict] = []
+    keyword_chunks: list[dict] = []
     for chunk in chunks:
-        metadatas.append(
-            {
-                "document_id": document_id,
-                "filename": Path(filename).name,
-                "page": chunk.page,
-                "chunk_index": chunk.chunk_index,
-                "document_chunk_count": chunk.document_chunk_count,
-            }
-        )
+        metadata = {
+            "document_id": document_id,
+            "filename": Path(filename).name,
+            "page": chunk.page,
+            "chunk_index": chunk.chunk_index,
+            "document_chunk_count": chunk.document_chunk_count,
+        }
+        metadatas.append(metadata)
+        keyword_chunks.append({"text": chunk.text, "metadata": metadata})
 
     vector_store.upsert_chunks(
         ids=[chunk.id for chunk in chunks],
@@ -66,6 +68,7 @@ def _index_pdf_content(
         documents=texts,
         metadatas=metadatas,
     )
+    keyword_index.index_document(document_id, keyword_chunks)
 
     info = DocumentInfo(
         document_id=document_id,
@@ -88,12 +91,14 @@ def delete_document(document_id: str) -> dict:
     settings = get_settings()
     registry = get_registry()
     vector_store = get_vector_store()
+    keyword_index = get_keyword_index()
 
     existing = registry.find_by_id(document_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Documento não encontrado.")
 
     vector_store.delete_document(document_id)
+    keyword_index.remove_document(document_id)
     registry.remove(document_id)
 
     upload_path = Path(settings.upload_dir) / existing.filename
