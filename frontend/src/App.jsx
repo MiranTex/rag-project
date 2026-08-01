@@ -23,6 +23,7 @@ export default function App() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [asking, setAsking] = useState(false);
+  const [multiQuery, setMultiQuery] = useState(false);
 
   useEffect(() => {
     try {
@@ -92,6 +93,7 @@ export default function App() {
         answer: "",
         sources: [],
         retrievalDiagnostics: [],
+        expandedQueries: [],
       },
     ]);
 
@@ -101,17 +103,20 @@ export default function App() {
           question: cleanQuestion,
           document_id: selectedDocument || null,
           include_debug: true,
+          multi_query: multiQuery,
         },
         {
           onSources: (sources) => {
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === pendingIndex
-                  ? {
-                      ...msg,
-                      sources,
-                    }
-                  : msg,
+                msg.id === pendingIndex ? { ...msg, sources } : msg,
+              ),
+            );
+          },
+          onExpandedQueries: (expandedQueries) => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === pendingIndex ? { ...msg, expandedQueries } : msg,
               ),
             );
           },
@@ -255,6 +260,8 @@ export default function App() {
           onExport={handleExportChat}
           asking={asking}
           messages={messages}
+          multiQuery={multiQuery}
+          onMultiQueryChange={setMultiQuery}
         />
       </section>
     </main>

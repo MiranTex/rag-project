@@ -190,7 +190,30 @@ textarea {
 
 .chat-toolbar {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.multi-query-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  user-select: none;
+}
+
+.multi-query-toggle input {
+  width: auto;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .chat-toolbar button {
@@ -293,9 +316,20 @@ textarea {
   letter-spacing: 0.05em;
 }
 
-.context-box ul {
+.context-box ul,
+.context-box ol {
   margin: 0 0 10px;
   padding-left: 18px;
+}
+
+.expanded-queries-list {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.expanded-queries-list li {
+  margin-bottom: 4px;
+  font-style: italic;
 }
 
 .diag-list li {

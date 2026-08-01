@@ -135,6 +135,9 @@ export async function askQuestionStream(payload, handlers) {
       if (evt.event === "sources" && handlers?.onSources) {
         handlers.onSources(evt.data.sources || []);
       }
+      if (evt.event === "expanded_queries" && handlers?.onExpandedQueries) {
+        handlers.onExpandedQueries(evt.data.expanded_queries || []);
+      }
       if (evt.event === "diagnostics" && handlers?.onDiagnostics) {
         handlers.onDiagnostics(evt.data.retrieval_diagnostics || []);
       }

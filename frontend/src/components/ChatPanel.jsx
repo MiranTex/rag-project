@@ -8,6 +8,8 @@ export default function ChatPanel({
   onExport,
   asking,
   messages,
+  multiQuery,
+  onMultiQueryChange,
 }) {
   const streamRef = useRef(null);
   const [expandedById, setExpandedById] = useState({});
@@ -40,6 +42,14 @@ export default function ChatPanel({
           <p className="muted">Pergunta de um lado, resposta do outro, como num chat convencional.</p>
         </div>
         <div className="chat-toolbar">
+          <label className="multi-query-toggle" title="Expande a pergunta em variantes antes de fazer retrieval">
+            <input
+              type="checkbox"
+              checked={multiQuery}
+              onChange={(e) => onMultiQueryChange(e.target.checked)}
+            />
+            Multi-Query
+          </label>
           <button type="button" onClick={onExport} disabled={messages.length === 0}>
             Exportar historico
           </button>
@@ -58,7 +68,8 @@ export default function ChatPanel({
 
         {messages.map((msg) => {
           const hasContext = (msg.sources && msg.sources.length > 0)
-            || (msg.retrievalDiagnostics && msg.retrievalDiagnostics.length > 0);
+            || (msg.retrievalDiagnostics && msg.retrievalDiagnostics.length > 0)
+            || (msg.expandedQueries && msg.expandedQueries.length > 0);
           const isExpanded = !!expandedById[msg.id];
 
           return (
@@ -84,6 +95,16 @@ export default function ChatPanel({
 
                 {isExpanded && (
                   <div className="context-box">
+                    {msg.expandedQueries?.length > 0 && (
+                      <>
+                        <h3>Queries expandidas ({msg.expandedQueries.length})</h3>
+                        <ol className="expanded-queries-list">
+                          {msg.expandedQueries.map((q, i) => (
+                            <li key={`${msg.id}-eq-${i}`}>{q}</li>
+                          ))}
+                        </ol>
+                      </>
+                    )}
                     <h3>Fontes</h3>
                     {msg.sources?.length ? (
                       <ul>
