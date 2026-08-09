@@ -12,7 +12,7 @@ SYSTEM_PROMPT = """
 És um assistente de estudo em PT-PT.
 Responde apenas com base no contexto fornecido.
 Se o contexto não for suficiente, diz claramente que não tens informação suficiente.
-Inclui sempre uma resposta objetiva e curta.
+Quando houver contexto suficiente, responde com detalhe útil, estrutura clara e boa legibilidade.
 """.strip()
 
 
@@ -35,14 +35,23 @@ def build_answer_prompt(question: str, context_text: str) -> str:
         "Contexto recuperado:\n"
         f"{context_text}\n\n"
         "Instruções:\n"
-        "- Responde em PT-PT, de forma objetiva e concisa.\n"
+        "- Responde em PT-PT, com detalhe suficiente para ser útil, sem te limitares a uma resposta demasiado curta.\n"
         "- Baseia-te apenas no contexto recuperado.\n"
         "- Não inventes factos. Se o contexto não for suficiente, diz claramente que não tens informação suficiente.\n"
-        "- Quando houver contexto relevante, resume em frases curtas e cita sempre a fonte e a página no fim.\n"
+        "- Quando houver contexto relevante, explica os pontos principais em 2 a 4 parágrafos ou numa lista curta, conforme fizer mais sentido para a pergunta.\n"
+        "- Usa Markdown simples para organizar a resposta.\n"
+        "- Cita sempre a fonte e a página no fim.\n"
         "- Formato obrigatório:\n"
-        "  Resposta: <conteúdo objetivo>\n"
-        "  Fontes usadas: [ficheiro, p.X], [ficheiro, p.Y]\n"
-        "- Se não houver contexto suficiente: Resposta: Informação insuficiente no contexto recuperado."
+        "  ### Resposta\n"
+        "  <explicação objetiva, mas desenvolvida e bem estruturada>\n\n"
+        "  ### Fontes usadas\n"
+        "  - [ficheiro, p.X]\n"
+        "  - [ficheiro, p.Y]\n"
+        "- Se não houver contexto suficiente, responde exatamente com esta estrutura:\n"
+        "  ### Resposta\n"
+        "  Informação insuficiente no contexto recuperado.\n\n"
+        "  ### Fontes usadas\n"
+        "  - Nenhuma"
     )
 
 

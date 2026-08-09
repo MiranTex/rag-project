@@ -268,6 +268,80 @@ textarea {
   word-break: break-word;
 }
 
+.answer-markdown {
+  display: grid;
+  gap: 10px;
+}
+
+.answer-markdown > :first-child {
+  margin-top: 0;
+}
+
+.answer-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.answer-markdown p,
+.answer-markdown ul,
+.answer-markdown ol,
+.answer-markdown pre,
+.answer-markdown blockquote,
+.answer-markdown h1,
+.answer-markdown h2,
+.answer-markdown h3,
+.answer-markdown h4 {
+  margin: 0;
+  word-break: break-word;
+}
+
+.answer-markdown h1,
+.answer-markdown h2,
+.answer-markdown h3,
+.answer-markdown h4 {
+  line-height: 1.2;
+}
+
+.answer-markdown h3,
+.answer-markdown h4 {
+  font-size: 15px;
+}
+
+.answer-markdown ul,
+.answer-markdown ol {
+  padding-left: 20px;
+}
+
+.answer-markdown li + li {
+  margin-top: 4px;
+}
+
+.answer-markdown code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.92em;
+  background: rgba(215, 88, 43, 0.08);
+  border-radius: 6px;
+  padding: 0.12rem 0.35rem;
+}
+
+.answer-markdown pre {
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 12px;
+  background: #f4ede4;
+  border: 1px solid #ead8c3;
+}
+
+.answer-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.answer-markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+
 .bubble-user {
   align-self: flex-end;
   background: linear-gradient(140deg, #d7582b, #b94c25);

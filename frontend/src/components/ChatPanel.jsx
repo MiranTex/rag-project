@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 
 export default function ChatPanel({
   question,
@@ -81,7 +82,13 @@ export default function ChatPanel({
 
               <div className="bubble bubble-assistant">
                 <p className="bubble-label">Assistente</p>
-                <p>{msg.answer || (asking ? "A responder..." : "")}</p>
+                {msg.answer ? (
+                  <div className="answer-markdown">
+                    <ReactMarkdown>{msg.answer}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p>{asking ? "A responder..." : ""}</p>
+                )}
 
                 {hasContext && (
                   <button

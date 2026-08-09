@@ -5,9 +5,10 @@ import requests
 
 
 class LMStudioClient:
-    def __init__(self, base_url: str, model: str) -> None:
+    def __init__(self, base_url: str, model: str, max_tokens: int = 900) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.max_tokens = max_tokens
 
     def health(self) -> bool:
         response = requests.get(f"{self.base_url}/models", timeout=5)
@@ -21,6 +22,7 @@ class LMStudioClient:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": temperature,
+            "max_tokens": self.max_tokens,
         }
         response = requests.post(
             f"{self.base_url}/chat/completions",
@@ -39,6 +41,7 @@ class LMStudioClient:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": temperature,
+            "max_tokens": self.max_tokens,
             "stream": True,
         }
         response = requests.post(

@@ -37,6 +37,7 @@ def get_lmstudio_client() -> LMStudioClient:
     return LMStudioClient(
         base_url=settings.lm_studio_base_url,
         model=settings.lm_studio_chat_model,
+        max_tokens=settings.lm_studio_max_tokens,
     )
 
 

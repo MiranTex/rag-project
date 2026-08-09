@@ -22,9 +22,11 @@ def test_answer_prompt_is_more_strict_with_context() -> None:
 
     assert "Baseia-te apenas no contexto recuperado." in prompt
     assert "Não inventes factos" in prompt
-    assert "cita sempre a fonte" in prompt
-    assert "Fontes usadas:" in prompt
+    assert "Usa Markdown simples" in prompt
+    assert "### Resposta" in prompt
+    assert "### Fontes usadas" in prompt
     assert "Formato obrigatório:" in prompt
+    assert "2 a 4 parágrafos" in prompt
 
 
 class _FakeVectorStore:
