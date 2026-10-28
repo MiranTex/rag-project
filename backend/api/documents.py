@@ -1,7 +1,10 @@
+import logging
+import time
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from backend.config import get_settings
 from backend.dependencies import get_keyword_index, get_registry, get_vector_store
@@ -16,6 +19,7 @@ from backend.services.pdf_ingestion import (
 )
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+logger = logging.getLogger(__name__)
 
 
 def _index_pdf_content(
@@ -28,14 +32,24 @@ def _index_pdf_content(
     vector_store = get_vector_store()
     keyword_index = get_keyword_index()
 
+    started = time.perf_counter()
+    logger.info("A indexar %s (%s)", filename, document_id)
     saved_path = save_uploaded_file(settings.upload_dir, filename, raw)
-    pages = extract_pages(saved_path)
+    pages = extract_pages(
+        saved_path,
+        ocr_languages=settings.ocr_languages if settings.ocr_enabled else None,
+        ocr_dpi=settings.ocr_dpi,
+        ocr_min_text_chars=settings.ocr_min_text_chars,
+        ocr_min_confidence=settings.ocr_min_confidence,
+        ocr_max_workers=settings.ocr_max_workers,
+    )
 
     if not pages:
         raise HTTPException(status_code=400, detail="Não foi possível extrair texto do PDF.")
 
+    pages_by_number = {page.page: page for page in pages}
     chunks = chunk_pages(
-        pages=pages,
+        pages=[(page.page, page.text) for page in pages],
         document_id=document_id,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
@@ -45,6 +59,7 @@ def _index_pdf_content(
         raise HTTPException(status_code=400, detail="Não foram gerados chunks válidos.")
 
     texts = [chunk.text for chunk in chunks]
+    logger.info("%s: %d página(s) com texto, %d chunks; a gerar embeddings", filename, len(pages), len(chunks))
     embeddings = embed_texts(settings.embedding_model, texts)
 
     vector_store.delete_document(document_id)
@@ -58,7 +73,10 @@ def _index_pdf_content(
             "page": chunk.page,
             "chunk_index": chunk.chunk_index,
             "document_chunk_count": chunk.document_chunk_count,
+            "extraction": pages_by_number[chunk.page].source,
         }
+        if pages_by_number[chunk.page].ocr_confidence is not None:
+            metadata["ocr_confidence"] = pages_by_number[chunk.page].ocr_confidence
         metadatas.append(metadata)
         keyword_chunks.append({"text": chunk.text, "metadata": metadata})
 
@@ -78,6 +96,7 @@ def _index_pdf_content(
         chunk_count=len(chunks),
     )
     registry.add_or_replace(info)
+    logger.info("%s indexado em %.1fs", filename, time.perf_counter() - started)
     return info
 
 
@@ -109,7 +128,7 @@ def delete_document(document_id: str) -> dict:
 
 
 @router.post("/{document_id}/reindex", response_model=UploadResponse)
-def reindex_document(document_id: str) -> UploadResponse:
+async def reindex_document(document_id: str) -> UploadResponse:
     settings = get_settings()
     registry = get_registry()
 
@@ -125,7 +144,7 @@ def reindex_document(document_id: str) -> UploadResponse:
         )
 
     raw = upload_path.read_bytes()
-    info = _index_pdf_content(document_id=document_id, filename=existing.filename, raw=raw)
+    info = await run_in_threadpool(_index_pdf_content, document_id, existing.filename, raw)
     return UploadResponse(message="Documento reindexado com sucesso.", document=info)
 
 
@@ -153,6 +172,7 @@ async def upload_document(
         )
 
     document_id = existing.document_id if existing else str(uuid4())
-    info = _index_pdf_content(document_id=document_id, filename=file.filename, raw=raw)
+    # OCR e embeddings são CPU-bound: correr fora do event loop para não bloquear os outros pedidos.
+    info = await run_in_threadpool(_index_pdf_content, document_id, file.filename, raw)
 
     return UploadResponse(message="Documento indexado com sucesso.", document=info)

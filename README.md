@@ -301,3 +301,16 @@ Chroma indisponível:
 2. Adicionar streaming de resposta no chat.
 3. Adicionar autenticação simples para múltiplos utilizadores.
 4. Evoluir filtros por documento, período e tags.
+
+## Aula 11: OCR para PDFs digitalizados
+
+Páginas sem camada de texto (digitalizações) passam por OCR com Tesseract (`por+eng`):
+
+1. O pypdf tenta extrair o texto de cada página.
+2. Páginas com menos de `OCR_MIN_TEXT_CHARS` caracteres são renderizadas a `OCR_DPI` (pypdfium2) e enviadas ao Tesseract, em paralelo.
+3. O texto do OCR é limpo: junta palavras hifenizadas na quebra de linha e remove linhas de ruído (bordas, carimbos).
+4. A confiança média do Tesseract fica nos logs (`make logs`) e nos metadados de cada chunk (`extraction`, `ocr_confidence`). Abaixo de `OCR_MIN_CONFIDENCE` aparece um aviso para rever o texto.
+
+Variáveis: `OCR_ENABLED`, `OCR_LANGUAGES`, `OCR_DPI`, `OCR_MIN_TEXT_CHARS`, `OCR_MIN_CONFIDENCE`, `OCR_MAX_WORKERS`.
+
+Para documentos já indexados antes do OCR, usar o endpoint `POST /documents/{id}/reindex`.

@@ -1,10 +1,16 @@
 import hashlib
+import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pypdf import PdfReader
+
+from backend.services.ocr import ocr_image, render_page
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -14,6 +20,14 @@ class ChunkRecord:
     page: int
     chunk_index: int
     document_chunk_count: int = 0
+
+
+@dataclass
+class ExtractedPage:
+    page: int
+    text: str
+    source: str  # "text" (camada de texto do PDF) ou "ocr"
+    ocr_confidence: float | None = None
 
 
 def file_sha256(content: bytes) -> str:
@@ -27,14 +41,57 @@ def save_uploaded_file(upload_dir: str, filename: str, content: bytes) -> Path:
     return target
 
 
-def extract_pages(pdf_path: Path) -> list[tuple[int, str]]:
+def extract_pages(
+    pdf_path: Path,
+    ocr_languages: str | None = None,
+    ocr_dpi: int = 300,
+    ocr_min_text_chars: int = 30,
+    ocr_min_confidence: float = 60.0,
+    ocr_max_workers: int = 4,
+) -> list[ExtractedPage]:
+    """Extrai o texto de cada página; páginas sem camada de texto passam por OCR se ocr_languages estiver definido."""
     reader = PdfReader(str(pdf_path))
-    pages: list[tuple[int, str]] = []
+    pages: list[ExtractedPage] = []
+    ocr_candidates: list[int] = []
     for i, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-        if text:
-            normalized = " ".join(text.split())
-            pages.append((i, normalized))
+        text = " ".join((page.extract_text() or "").split())
+        if len(text) >= ocr_min_text_chars:
+            pages.append(ExtractedPage(page=i, text=text, source="text"))
+        else:
+            ocr_candidates.append(i)
+
+    if ocr_candidates and not ocr_languages:
+        logger.warning("%s: %d página(s) sem texto ignoradas (OCR desativado): %s", pdf_path.name, len(ocr_candidates), ocr_candidates)
+    elif ocr_candidates:
+        logger.info("%s: a aplicar OCR a %d página(s): %s", pdf_path.name, len(ocr_candidates), ocr_candidates)
+
+        def run_ocr(page_number: int):
+            return page_number, ocr_image(render_page(pdf_path, page_number, ocr_dpi), ocr_languages)
+
+        with ThreadPoolExecutor(max_workers=max(1, ocr_max_workers)) as pool:
+            for page_number, result in pool.map(run_ocr, ocr_candidates):
+                if not result.text:
+                    logger.warning("%s p.%d: OCR não encontrou texto", pdf_path.name, page_number)
+                    continue
+                log = logger.warning if result.confidence < ocr_min_confidence else logger.info
+                log(
+                    "%s p.%d: OCR %d palavras, confiança média %.1f%s",
+                    pdf_path.name,
+                    page_number,
+                    result.word_count,
+                    result.confidence,
+                    " (baixa — rever texto)" if result.confidence < ocr_min_confidence else "",
+                )
+                pages.append(
+                    ExtractedPage(
+                        page=page_number,
+                        text=" ".join(result.text.split()),
+                        source="ocr",
+                        ocr_confidence=result.confidence,
+                    )
+                )
+
+    pages.sort(key=lambda p: p.page)
     return pages
 
 
