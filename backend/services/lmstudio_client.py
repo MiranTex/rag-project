@@ -5,12 +5,13 @@ import requests
 
 
 class LMStudioClient:
-    def __init__(self, base_url: str, model: str) -> None:
+    def __init__(self, base_url: str, model: str, api_key: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     def health(self) -> bool:
-        response = requests.get(f"{self.base_url}/models", timeout=5)
+        response = requests.get(f"{self.base_url}/models", headers=self.headers, timeout=5)
         return response.ok
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> str:
@@ -25,6 +26,7 @@ class LMStudioClient:
         response = requests.post(
             f"{self.base_url}/chat/completions",
             json=payload,
+            headers=self.headers,
             timeout=120,
         )
         response.raise_for_status()
@@ -44,6 +46,7 @@ class LMStudioClient:
         response = requests.post(
             f"{self.base_url}/chat/completions",
             json=payload,
+            headers=self.headers,
             timeout=120,
             stream=True,
         )

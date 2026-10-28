@@ -34,6 +34,12 @@ def get_keyword_index() -> KeywordIndex:
 @lru_cache(maxsize=1)
 def get_lmstudio_client() -> LMStudioClient:
     settings = get_settings()
+    if settings.open_router_api_key:
+        return LMStudioClient(
+            base_url=settings.open_router_base_url,
+            model=settings.open_router_chat_model,
+            api_key=settings.open_router_api_key,
+        )
     return LMStudioClient(
         base_url=settings.lm_studio_base_url,
         model=settings.lm_studio_chat_model,
