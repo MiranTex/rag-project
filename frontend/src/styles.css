@@ -558,3 +558,9 @@ textarea {
 .markdown th {
   background: #fff3e4;
 }
+
+.bubble-blocked {
+  background: #f6f1ea;
+  border-style: dashed;
+  color: var(--muted);
+}

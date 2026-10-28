@@ -14,7 +14,7 @@ class ChatCompletionClient(Protocol):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
-        tool_choice: str | None = None,
+        tool_choice: str | dict | None = None,
     ) -> dict: ...
 
 

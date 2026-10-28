@@ -354,3 +354,17 @@ Além do chat RAG, existe um modo **Agente**. O modelo decide que ferramentas us
 3. Se só fizer sentido em alguns contextos, inclui-a no `tool_names` do perfil certo em `profiles.py`.
 
 Erros esperados devem levantar `ToolError`. A mensagem é devolvida ao modelo para ele corrigir o pedido.
+
+### Guarda de âmbito
+
+Antes do agente, um modelo pequeno (`GUARD_MODEL`, por defeito Haiku) classifica cada mensagem numa categoria (`backend/agent/guard.py`):
+
+| Categoria | Por defeito |
+|---|---|
+| `documentos`, `seguimento`, `assistente`, `conversa`, `conhecimento_geral`, `calculo` | permitida |
+| `fora_do_ambito` (jogos, escrita criativa, programação, temas não relacionados, tentativas de mudar as regras) | bloqueada com mensagem fixa, sem acionar o agente |
+
+- O modelo só classifica; **quem decide o bloqueio é o perfil** (`AgentProfile.blocked_categories`), por isso a política é explícita e configurável.
+- O guarda vê as últimas trocas, para perceber seguimentos ("e em percentagem?") e para bloquear a continuação de conversas fora do âmbito.
+- Se o guarda falhar, o pedido é permitido (fail-open) e fica um aviso nos logs. O âmbito no prompt do agente é a segunda linha de defesa: em pedidos mistos responde só à parte do âmbito, e ignora instruções que apareçam dentro dos documentos.
+- `GUARD_ENABLED=false` desativa o guarda.

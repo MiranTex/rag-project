@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from backend.agent.profiles import DEFAULT_PROFILE, PROFILES
+from backend.agent.profiles import BLOCKED_MESSAGE, DEFAULT_PROFILE, PROFILES, AgentProfile
 from backend.agent.runner import AgentRunner
 from backend.agent.tools import ToolContext
 from backend.api.sse import sse_event
@@ -13,6 +13,7 @@ from backend.dependencies import (
     get_lmstudio_client,
     get_rag_pipeline,
     get_registry,
+    get_scope_guard,
     get_tool_registry,
     get_vector_store,
 )
@@ -37,11 +38,14 @@ def list_profiles() -> list[AgentProfileInfo]:
     ]
 
 
-def _build_runner(payload: AgentAskRequest) -> AgentRunner:
+def _resolve_profile(payload: AgentAskRequest) -> AgentProfile:
     profile = PROFILES.get(payload.profile or DEFAULT_PROFILE)
     if profile is None:
         raise HTTPException(status_code=400, detail=f"Perfil desconhecido: {payload.profile}")
+    return profile
 
+
+def _build_runner(payload: AgentAskRequest, profile: AgentProfile) -> AgentRunner:
     settings = get_settings()
     scope_note = None
     if payload.document_id:
@@ -84,11 +88,26 @@ def ask_agent_stream(payload: AgentAskRequest) -> StreamingResponse:
     if not question:
         raise HTTPException(status_code=400, detail="Pergunta inválida.")
 
-    runner = _build_runner(payload)
+    profile = _resolve_profile(payload)
+    runner = _build_runner(payload, profile)
     history = _history_messages(payload)
+    guard_enabled = get_settings().guard_enabled
 
     def stream() -> Iterator[str]:
         try:
+            if guard_enabled:
+                decision = get_scope_guard().check(
+                    question,
+                    history,
+                    document_names=[d.filename for d in get_registry().list_documents()],
+                    blocked_categories=profile.blocked_categories,
+                )
+                yield sse_event("guard", vars(decision))
+                if not decision.allowed:
+                    yield sse_event("answer", {"answer": BLOCKED_MESSAGE, "steps": 0, "blocked": True})
+                    yield sse_event("done", {})
+                    return
+
             for event in runner.run(question, history):
                 yield sse_event(event.type, event.data)
             yield sse_event("done", {})

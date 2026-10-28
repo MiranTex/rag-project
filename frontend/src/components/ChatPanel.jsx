@@ -125,7 +125,7 @@ export default function ChatPanel({
                 <p>{msg.question}</p>
               </div>
 
-              <div className="bubble bubble-assistant">
+              <div className={`bubble bubble-assistant${msg.blocked ? " bubble-blocked" : ""}`}>
                 <p className="bubble-label">{isAgent ? "Agente" : "Assistente"}</p>
                 {isAgent && <AgentSteps steps={msg.steps} />}
                 {isAgent && msg.answer ? (

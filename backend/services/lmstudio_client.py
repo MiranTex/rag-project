@@ -37,7 +37,7 @@ class LMStudioClient:
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
-        tool_choice: str | None = None,
+        tool_choice: str | dict | None = None,
         temperature: float = 0.2,
     ) -> dict:
         """Chamada no formato OpenAI com suporte a tool calling; devolve a mensagem do assistente."""

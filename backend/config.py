@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     upload_dir: str = "data/uploads"
     export_dir: str = "data/exports"
     agent_max_steps: int = 8
+    guard_enabled: bool = True
+    guard_model: str = "anthropic/claude-haiku-5.5"
     ocr_enabled: bool = True
     ocr_languages: str = "por+eng"
     ocr_dpi: int = 300

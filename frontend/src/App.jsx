@@ -93,6 +93,11 @@ export default function App() {
           history,
         },
         ({ event, data }) => {
+          if (event === "guard") {
+            updateMessage(pendingIndex, (msg) => ({
+              steps: [...msg.steps, { type: "guard", category: data.category, allowed: data.allowed }],
+            }));
+          }
           if (event === "thinking") {
             updateMessage(pendingIndex, (msg) => ({ steps: [...msg.steps, { type: "thinking", text: data.text }] }));
           }
@@ -118,7 +123,7 @@ export default function App() {
             updateMessage(pendingIndex, () => ({ sources: data.sources || [] }));
           }
           if (event === "answer") {
-            updateMessage(pendingIndex, () => ({ answer: data.answer }));
+            updateMessage(pendingIndex, () => ({ answer: data.answer, blocked: !!data.blocked }));
           }
         },
       );

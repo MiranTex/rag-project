@@ -12,6 +12,17 @@ const TOOL_LABELS = {
 
 const STATUS_ICON = { running: "…", ok: "✓", error: "✕" };
 
+const GUARD_LABELS = {
+  documentos: "pergunta sobre documentos",
+  seguimento: "seguimento da conversa",
+  assistente: "pergunta sobre o assistente",
+  conversa: "conversa",
+  conhecimento_geral: "conhecimento geral",
+  calculo: "cálculo",
+  fora_do_ambito: "fora do âmbito",
+  erro_guarda: "verificação indisponível",
+};
+
 function describeArguments(name, args = {}) {
   if (name === "search_documents") return `"${args.query}"`;
   if (name === "read_document") {
@@ -29,7 +40,13 @@ export default function AgentSteps({ steps }) {
   return (
     <ol className="agent-steps">
       {steps.map((step, i) =>
-        step.type === "thinking" ? (
+        step.type === "guard" ? (
+          <li key={i} className={`agent-step agent-step-${step.allowed ? "ok" : "error"}`}>
+            <span className="agent-step-icon">{step.allowed ? "✓" : "⛔"}</span>
+            <span className="agent-step-name">Verificação de âmbito</span>
+            <span className="agent-step-args">{GUARD_LABELS[step.category] || step.category}</span>
+          </li>
+        ) : step.type === "thinking" ? (
           <li key={i} className="agent-step agent-step-thinking">
             {step.text}
           </li>

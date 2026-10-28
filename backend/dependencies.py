@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from backend.agent.guard import ScopeGuard
 from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_settings
 from backend.services.document_registry import DocumentRegistry
@@ -70,3 +71,18 @@ def get_export_store() -> ExportStore:
 @lru_cache(maxsize=1)
 def get_tool_registry() -> ToolRegistry:
     return build_registry()
+
+
+@lru_cache(maxsize=1)
+def get_scope_guard() -> ScopeGuard:
+    settings = get_settings()
+    if settings.open_router_api_key:
+        # Modelo pequeno e barato: só classifica, não responde.
+        llm = LMStudioClient(
+            base_url=settings.open_router_base_url,
+            model=settings.guard_model,
+            api_key=settings.open_router_api_key,
+        )
+    else:
+        llm = get_lmstudio_client()
+    return ScopeGuard(llm)
