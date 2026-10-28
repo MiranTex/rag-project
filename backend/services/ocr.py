@@ -1,10 +1,14 @@
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 import pypdfium2 as pdfium
 import pytesseract
 from PIL import Image
+
+# O pdfium não é thread-safe (renderizações concorrentes dão segfault); só o tesseract corre em paralelo.
+_pdfium_lock = threading.Lock()
 
 
 @dataclass
@@ -15,13 +19,14 @@ class OcrResult:
 
 
 def render_page(pdf_path: Path, page_number: int, dpi: int) -> Image.Image:
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    try:
-        page = pdf[page_number - 1]
-        bitmap = page.render(scale=dpi / 72)
-        return bitmap.to_pil().convert("L")
-    finally:
-        pdf.close()
+    with _pdfium_lock:
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        try:
+            page = pdf[page_number - 1]
+            bitmap = page.render(scale=dpi / 72)
+            return bitmap.to_pil().convert("L")
+        finally:
+            pdf.close()
 
 
 def ocr_image(image: Image.Image, languages: str) -> OcrResult:

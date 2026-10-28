@@ -49,3 +49,4 @@ def test_extract_pages_applies_ocr_to_image_pages(tmp_path):
     assert page.ocr_confidence is not None and page.ocr_confidence > 60
     assert "Contrato de trabalho" in page.text
     assert "1500 euros" in page.text
+

@@ -2,6 +2,7 @@ services:
   chroma:
     image: chromadb/chroma:0.5.5
     container_name: rag_chroma
+    restart: unless-stopped
     ports:
       - "8001:8000"
     environment:
@@ -20,6 +21,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: rag_backend
+    restart: unless-stopped
     env_file: .env
     environment:
       - CHROMA_HOST=chroma
@@ -40,6 +42,7 @@ services:
   frontend:
     build: ./frontend
     container_name: rag_frontend
+    restart: unless-stopped
     ports:
       - "5173:80"
     depends_on:

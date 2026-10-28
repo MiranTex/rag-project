@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -21,8 +22,27 @@ from backend.services.pdf_ingestion import (
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
 
+_indexing_ids: set[str] = set()
+_indexing_lock = threading.Lock()
+
 
 def _index_pdf_content(
+    document_id: str,
+    filename: str,
+    raw: bytes,
+) -> DocumentInfo:
+    with _indexing_lock:
+        if document_id in _indexing_ids:
+            raise HTTPException(status_code=409, detail="Documento já está a ser indexado.")
+        _indexing_ids.add(document_id)
+    try:
+        return _index_pdf_content_unlocked(document_id, filename, raw)
+    finally:
+        with _indexing_lock:
+            _indexing_ids.discard(document_id)
+
+
+def _index_pdf_content_unlocked(
     document_id: str,
     filename: str,
     raw: bytes,
