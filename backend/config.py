@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 150
     upload_dir: str = "data/uploads"
+    export_dir: str = "data/exports"
+    agent_max_steps: int = 8
     ocr_enabled: bool = True
     ocr_languages: str = "por+eng"
     ocr_dpi: int = 300
@@ -53,4 +55,5 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.export_dir).mkdir(parents=True, exist_ok=True)
     return settings

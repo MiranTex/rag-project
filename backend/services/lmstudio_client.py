@@ -33,6 +33,32 @@ class LMStudioClient:
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()
 
+    def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
+        temperature: float = 0.2,
+    ) -> dict:
+        """Chamada no formato OpenAI com suporte a tool calling; devolve a mensagem do assistente."""
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if tools:
+            payload["tools"] = tools
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+        response = requests.post(
+            f"{self.base_url}/chat/completions",
+            json=payload,
+            headers=self.headers,
+            timeout=120,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]
+
     def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> Iterator[str]:
         payload = {
             "model": self.model,

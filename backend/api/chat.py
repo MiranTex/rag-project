@@ -1,9 +1,9 @@
-import json
 from collections.abc import Iterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from backend.api.sse import sse_event
 from backend.config import get_settings
 from backend.dependencies import get_rag_pipeline
 from backend.models import AskRequest, AskResponse
@@ -63,10 +63,6 @@ def ask_question(payload: AskRequest) -> AskResponse:
     return AskResponse(answer=answer, sources=sources)
 
 
-def _sse_event(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
 @router.post("/ask-stream")
 def ask_question_stream(payload: AskRequest) -> StreamingResponse:
     question = payload.question.strip()
@@ -90,16 +86,16 @@ def ask_question_stream(payload: AskRequest) -> StreamingResponse:
                     retrieval_mode=retrieval_mode,
                     keyword_top_k=payload.keyword_top_k,
                 )
-                yield _sse_event("sources", {"sources": [src.model_dump() for src in sources]})
+                yield sse_event("sources", {"sources": [src.model_dump() for src in sources]})
                 if payload.include_debug:
-                    yield _sse_event("expanded_queries", {"expanded_queries": expanded})
-                    yield _sse_event(
+                    yield sse_event("expanded_queries", {"expanded_queries": expanded})
+                    yield sse_event(
                         "diagnostics",
                         {"retrieval_diagnostics": [item.model_dump() for item in diagnostics]},
                     )
                 for token in tokens:
-                    yield _sse_event("token", {"token": token})
-                yield _sse_event("done", {"answer": "".join(tokens)})
+                    yield sse_event("token", {"token": token})
+                yield sse_event("done", {"answer": "".join(tokens)})
                 return
 
             user_prompt, sources, diagnostics = pipeline.build_user_prompt_with_debug(
@@ -109,9 +105,9 @@ def ask_question_stream(payload: AskRequest) -> StreamingResponse:
                 retrieval_mode=retrieval_mode,
                 keyword_top_k=payload.keyword_top_k,
             )
-            yield _sse_event("sources", {"sources": [src.model_dump() for src in sources]})
+            yield sse_event("sources", {"sources": [src.model_dump() for src in sources]})
             if payload.include_debug:
-                yield _sse_event(
+                yield sse_event(
                     "diagnostics",
                     {"retrieval_diagnostics": [item.model_dump() for item in diagnostics]},
                 )
@@ -119,10 +115,10 @@ def ask_question_stream(payload: AskRequest) -> StreamingResponse:
             answer_tokens: list[str] = []
             for token in pipeline.lmstudio_client.chat_stream(SYSTEM_PROMPT, user_prompt):
                 answer_tokens.append(token)
-                yield _sse_event("token", {"token": token})
+                yield sse_event("token", {"token": token})
 
-            yield _sse_event("done", {"answer": "".join(answer_tokens)})
+            yield sse_event("done", {"answer": "".join(answer_tokens)})
         except Exception as exc:
-            yield _sse_event("error", {"detail": str(exc)})
+            yield sse_event("error", {"detail": str(exc)})
 
     return StreamingResponse(stream(), media_type="text/event-stream")

@@ -103,6 +103,22 @@ class RagPipeline:
         answer = self.lmstudio_client.chat(SYSTEM_PROMPT, user_prompt)
         return answer, sources, diagnostics
 
+    def retrieve_sources(
+        self,
+        question: str,
+        top_k: int,
+        document_id: str | None = None,
+        retrieval_mode: str | None = None,
+    ) -> list[SourceChunk]:
+        """Só retrieval + reranking, sem gerar resposta (usado pelas tools do agente)."""
+        sources, _ = self._retrieve_sources(
+            question=question,
+            top_k=top_k,
+            document_id=document_id,
+            retrieval_mode=retrieval_mode,
+        )
+        return sources
+
     def _retrieve_sources(
         self,
         question: str,

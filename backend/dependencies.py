@@ -1,7 +1,9 @@
 from functools import lru_cache
 
+from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_settings
 from backend.services.document_registry import DocumentRegistry
+from backend.services.export_store import ExportStore
 from backend.services.keyword_index import KeywordIndex
 from backend.services.lmstudio_client import LMStudioClient
 from backend.services.rag_pipeline import RagPipeline
@@ -58,3 +60,13 @@ def get_rag_pipeline() -> RagPipeline:
         retrieval_mode_default=settings.retrieval_mode_default,
         keyword_candidate_multiplier=settings.keyword_candidate_multiplier,
     )
+
+
+@lru_cache(maxsize=1)
+def get_export_store() -> ExportStore:
+    return ExportStore(get_settings().export_dir)
+
+
+@lru_cache(maxsize=1)
+def get_tool_registry() -> ToolRegistry:
+    return build_registry()

@@ -60,3 +60,28 @@ class AskResponse(BaseModel):
     sources: list[SourceChunk]
     retrieval_diagnostics: list[RetrievalDiagnostic] | None = None
     expanded_queries: list[str] | None = None
+
+
+class AgentTurn(BaseModel):
+    question: str
+    answer: str
+
+
+class AgentAskRequest(BaseModel):
+    question: str = Field(min_length=2)
+    profile: str | None = None
+    document_id: str | None = None
+    history: list[AgentTurn] = Field(default_factory=list, max_length=20)
+
+
+class AgentProfileInfo(BaseModel):
+    name: str
+    label: str
+    description: str
+    tools: list[str]
+
+
+class ExportInfo(BaseModel):
+    name: str
+    size: int
+    created_at: str

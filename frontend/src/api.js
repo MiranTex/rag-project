@@ -88,8 +88,8 @@ export async function askQuestion(payload) {
   return data;
 }
 
-export async function askQuestionStream(payload, handlers) {
-  const res = await fetch(`${API_BASE}/chat/ask-stream`, {
+async function streamEvents(path, payload, onEvent) {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -130,26 +130,46 @@ export async function askQuestionStream(payload, handlers) {
     const chunk = buffer.slice(0, boundary + 2);
     buffer = buffer.slice(boundary + 2);
 
-    const events = parseSseChunk(chunk);
-    for (const evt of events) {
-      if (evt.event === "sources" && handlers?.onSources) {
-        handlers.onSources(evt.data.sources || []);
-      }
-      if (evt.event === "expanded_queries" && handlers?.onExpandedQueries) {
-        handlers.onExpandedQueries(evt.data.expanded_queries || []);
-      }
-      if (evt.event === "diagnostics" && handlers?.onDiagnostics) {
-        handlers.onDiagnostics(evt.data.retrieval_diagnostics || []);
-      }
-      if (evt.event === "token" && handlers?.onToken) {
-        handlers.onToken(evt.data.token || "");
-      }
-      if (evt.event === "done" && handlers?.onDone) {
-        handlers.onDone(evt.data.answer || "");
-      }
+    for (const evt of parseSseChunk(chunk)) {
       if (evt.event === "error") {
         throw new Error(evt.data.detail || "Erro no stream do servidor");
       }
+      onEvent(evt);
     }
   }
+}
+
+export async function askQuestionStream(payload, handlers) {
+  await streamEvents("/chat/ask-stream", payload, (evt) => {
+    if (evt.event === "sources" && handlers?.onSources) {
+      handlers.onSources(evt.data.sources || []);
+    }
+    if (evt.event === "expanded_queries" && handlers?.onExpandedQueries) {
+      handlers.onExpandedQueries(evt.data.expanded_queries || []);
+    }
+    if (evt.event === "diagnostics" && handlers?.onDiagnostics) {
+      handlers.onDiagnostics(evt.data.retrieval_diagnostics || []);
+    }
+    if (evt.event === "token" && handlers?.onToken) {
+      handlers.onToken(evt.data.token || "");
+    }
+    if (evt.event === "done" && handlers?.onDone) {
+      handlers.onDone(evt.data.answer || "");
+    }
+  });
+}
+
+// Eventos: thinking, tool_call, tool_result, export, sources, answer, done.
+export async function askAgentStream(payload, onEvent) {
+  await streamEvents("/agent/ask-stream", payload, onEvent);
+}
+
+export async function getAgentProfiles() {
+  const res = await fetch(`${API_BASE}/agent/profiles`);
+  if (!res.ok) throw new Error("Falha ao listar perfis do agente");
+  return res.json();
+}
+
+export function exportUrl(name) {
+  return `${API_BASE}/exports/${encodeURIComponent(name)}`;
 }

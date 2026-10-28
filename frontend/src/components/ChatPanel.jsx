@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import AgentSteps from "./AgentSteps";
+import ExportLinks from "./ExportLinks";
+import Markdown from "./Markdown";
 
 export default function ChatPanel({
   question,
@@ -10,6 +13,11 @@ export default function ChatPanel({
   messages,
   multiQuery,
   onMultiQueryChange,
+  mode,
+  onModeChange,
+  profiles,
+  profile,
+  onProfileChange,
 }) {
   const streamRef = useRef(null);
   const [expandedById, setExpandedById] = useState({});
@@ -39,17 +47,54 @@ export default function ChatPanel({
       <div className="chat-header-row">
         <div>
           <h2>Chat</h2>
-          <p className="muted">Pergunta de um lado, resposta do outro, como num chat convencional.</p>
+          <p className="muted">
+            {mode === "agent"
+              ? "O agente pesquisa, calcula e pode exportar CSV ou documentos."
+              : "Pergunta de um lado, resposta do outro, como num chat convencional."}
+          </p>
         </div>
         <div className="chat-toolbar">
-          <label className="multi-query-toggle" title="Expande a pergunta em variantes antes de fazer retrieval">
-            <input
-              type="checkbox"
-              checked={multiQuery}
-              onChange={(e) => onMultiQueryChange(e.target.checked)}
-            />
-            Multi-Query
-          </label>
+          <div className="mode-switch" role="group" aria-label="Modo">
+            <button
+              type="button"
+              className={mode === "rag" ? "active" : ""}
+              onClick={() => onModeChange("rag")}
+              title="Pergunta direta ao RAG"
+            >
+              RAG
+            </button>
+            <button
+              type="button"
+              className={mode === "agent" ? "active" : ""}
+              onClick={() => onModeChange("agent")}
+              title="Agente com tools"
+            >
+              Agente
+            </button>
+          </div>
+          {mode === "agent" ? (
+            <select
+              className="profile-select"
+              value={profile}
+              onChange={(e) => onProfileChange(e.target.value)}
+              title={profiles.find((p) => p.name === profile)?.description}
+            >
+              {profiles.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <label className="multi-query-toggle" title="Expande a pergunta em variantes antes de fazer retrieval">
+              <input
+                type="checkbox"
+                checked={multiQuery}
+                onChange={(e) => onMultiQueryChange(e.target.checked)}
+              />
+              Multi-Query
+            </label>
+          )}
           <button type="button" onClick={onExport} disabled={messages.length === 0}>
             Exportar historico
           </button>
@@ -71,6 +116,7 @@ export default function ChatPanel({
             || (msg.retrievalDiagnostics && msg.retrievalDiagnostics.length > 0)
             || (msg.expandedQueries && msg.expandedQueries.length > 0);
           const isExpanded = !!expandedById[msg.id];
+          const isAgent = msg.mode === "agent";
 
           return (
             <article key={msg.id} className="chat-turn">
@@ -80,8 +126,14 @@ export default function ChatPanel({
               </div>
 
               <div className="bubble bubble-assistant">
-                <p className="bubble-label">Assistente</p>
-                <p>{msg.answer || (asking ? "A responder..." : "")}</p>
+                <p className="bubble-label">{isAgent ? "Agente" : "Assistente"}</p>
+                {isAgent && <AgentSteps steps={msg.steps} />}
+                {isAgent && msg.answer ? (
+                  <Markdown>{msg.answer}</Markdown>
+                ) : (
+                  <p>{msg.answer || (asking ? (isAgent ? "A trabalhar..." : "A responder...") : "")}</p>
+                )}
+                {isAgent && <ExportLinks exports={msg.exports} />}
 
                 {hasContext && (
                   <button
@@ -89,7 +141,9 @@ export default function ChatPanel({
                     className="context-toggle"
                     onClick={() => toggleContext(msg.id)}
                   >
-                    {isExpanded ? "Ocultar fontes e diagnostico" : "Mostrar fontes e diagnostico"}
+                    {isExpanded
+                      ? `Ocultar fontes${isAgent ? "" : " e diagnostico"}`
+                      : `Mostrar fontes${isAgent ? "" : " e diagnostico"}`}
                   </button>
                 )}
 
@@ -110,7 +164,8 @@ export default function ChatPanel({
                       <ul>
                         {msg.sources.map((source, i) => (
                           <li key={`${msg.id}-src-${i}`}>
-                            {source.filename} | pag. {source.page} | score {source.score.toFixed(3)}
+                            {source.filename} | pag. {source.page}
+                            {typeof source.score === "number" && ` | score ${source.score.toFixed(3)}`}
                           </li>
                         ))}
                       </ul>
@@ -118,8 +173,8 @@ export default function ChatPanel({
                       <p>Sem fontes devolvidas.</p>
                     )}
 
-                    <h3>Diagnostico do ranking</h3>
-                    {msg.retrievalDiagnostics?.length ? (
+                    {!isAgent && <h3>Diagnostico do ranking</h3>}
+                    {isAgent ? null : msg.retrievalDiagnostics?.length ? (
                       <ul className="diag-list">
                         {msg.retrievalDiagnostics.map((diag, i) => (
                           <li key={`${msg.id}-diag-${i}`}>

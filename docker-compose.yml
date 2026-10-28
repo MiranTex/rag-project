@@ -33,6 +33,7 @@ services:
       - "8000:8000"
     volumes:
       - ./data/uploads:/app/data/uploads
+      - ./data/exports:/app/data/exports
       - backend_storage:/app/backend/storage
       - hf_cache:/app/.cache/huggingface
     depends_on:

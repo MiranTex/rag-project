@@ -314,3 +314,43 @@ Páginas sem camada de texto (digitalizações) passam por OCR com Tesseract (`p
 Variáveis: `OCR_ENABLED`, `OCR_LANGUAGES`, `OCR_DPI`, `OCR_MIN_TEXT_CHARS`, `OCR_MIN_CONFIDENCE`, `OCR_MAX_WORKERS`.
 
 Para documentos já indexados antes do OCR, usar o endpoint `POST /documents/{id}/reindex`.
+
+## Aula 12: Agente com tools
+
+Além do chat RAG, existe um modo **Agente**. O modelo decide que ferramentas usar (pesquisar, ler páginas, calcular, exportar), vê os resultados e repete até ter a resposta. A pesquisa no RAG passa a ser uma das tools ("agentic RAG").
+
+### Componentes
+
+| Camada | Ficheiro | Responsabilidade |
+|---|---|---|
+| Orquestração | `backend/agent/runner.py` | Loop do agente: chama o LLM, executa `tool_calls`, devolve resultados, força resposta no último passo (`AGENT_MAX_STEPS`). Emite eventos. |
+| Perfis | `backend/agent/profiles.py` | Prompt de sistema + conjunto de tools por contexto (`assistente`, `consulta`). |
+| Eventos | `backend/agent/events.py` | `thinking`, `tool_call`, `tool_result`, `export`, `sources`, `answer` (enviados por SSE). |
+| Tools | `backend/agent/tools/` | `base.py` (Tool, registo, contexto), `documents.py`, `calculations.py`, `exports.py`. |
+| Serviços | `backend/services/export_store.py`, `document_writer.py` | Guardar ficheiros exportados (sem sobrescrever) e gerar CSV/Markdown/Word. |
+| API | `backend/api/agent.py`, `backend/api/exports.py` | `GET /agent/profiles`, `POST /agent/ask-stream`, `GET /exports`, `GET /exports/{nome}`. |
+| Frontend | `AgentSteps.jsx`, `ExportLinks.jsx`, `Markdown.jsx` | Passos do agente ao vivo, links de download, respostas em markdown. |
+
+### Tools disponíveis
+
+- **Documentos:** `list_documents`, `search_documents` (pesquisa híbrida), `read_document` (texto completo por página).
+- **Cálculo:** `calculate` (expressões aritméticas, avaliadas sem `eval`), `percentage_change`, `date_difference`, `date_add`.
+- **Exportação** (`side_effect=True`): `export_csv` (`;` + BOM, abre no Excel), `export_document` (`.docx` ou `.md`). Os ficheiros ficam em `data/exports/`.
+
+### Criar uma tool nova
+
+1. Num módulo em `backend/agent/tools/`, define os parâmetros (Pydantic) e a função:
+
+   ```python
+   class MyParams(BaseModel):
+       value: str = Field(description="...")  # a descrição chega ao modelo
+
+   @tool(name="my_tool", description="O que faz e quando usar.", params=MyParams)
+   def my_tool(params: MyParams, ctx: ToolContext) -> ToolResult:
+       return ToolResult(content={...}, summary="linha curta para a UI")
+   ```
+
+2. Adiciona-a a `ALL_TOOLS` em `backend/agent/tools/__init__.py`.
+3. Se só fizer sentido em alguns contextos, inclui-a no `tool_names` do perfil certo em `profiles.py`.
+
+Erros esperados devem levantar `ToolError`. A mensagem é devolvida ao modelo para ele corrigir o pedido.

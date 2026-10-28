@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import {
+  askAgentStream,
   askQuestionStream,
   deleteDocument,
+  getAgentProfiles,
   getDocuments,
   getHealth,
   reindexDocument,
@@ -11,6 +13,7 @@ import ChatPanel from "./components/ChatPanel";
 import UploadPanel from "./components/UploadPanel";
 
 const CHAT_STORAGE_KEY = "rag-study-chat-history";
+const AGENT_HISTORY_TURNS = 6;
 
 export default function App() {
   const [health, setHealth] = useState(null);
@@ -24,6 +27,9 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [asking, setAsking] = useState(false);
   const [multiQuery, setMultiQuery] = useState(false);
+  const [mode, setMode] = useState("agent");
+  const [profiles, setProfiles] = useState([]);
+  const [profile, setProfile] = useState("");
 
   useEffect(() => {
     try {
@@ -54,7 +60,73 @@ export default function App() {
     refreshData().catch((err) => {
       setUploadStatus(`Erro inicial: ${err.message}`);
     });
+    getAgentProfiles()
+      .then((data) => {
+        setProfiles(data);
+        setProfile((current) => current || data[0]?.name || "");
+      })
+      .catch(() => setProfiles([]));
   }, []);
+
+  function updateMessage(id, update) {
+    setMessages((prev) => prev.map((msg) => (msg.id === id ? { ...msg, ...update(msg) } : msg)));
+  }
+
+  async function handleAskAgent(cleanQuestion) {
+    const pendingIndex = Date.now();
+    const history = messages
+      .filter((msg) => msg.answer && !msg.answer.startsWith("Erro:"))
+      .slice(-AGENT_HISTORY_TURNS)
+      .map((msg) => ({ question: msg.question, answer: msg.answer }));
+
+    setMessages((prev) => [
+      ...prev,
+      { id: pendingIndex, mode: "agent", question: cleanQuestion, answer: "", sources: [], steps: [], exports: [] },
+    ]);
+
+    try {
+      await askAgentStream(
+        {
+          question: cleanQuestion,
+          profile: profile || null,
+          document_id: selectedDocument || null,
+          history,
+        },
+        ({ event, data }) => {
+          if (event === "thinking") {
+            updateMessage(pendingIndex, (msg) => ({ steps: [...msg.steps, { type: "thinking", text: data.text }] }));
+          }
+          if (event === "tool_call") {
+            updateMessage(pendingIndex, (msg) => ({
+              steps: [
+                ...msg.steps,
+                { type: "tool", id: data.id, name: data.name, arguments: data.arguments, sideEffect: data.side_effect, status: "running" },
+              ],
+            }));
+          }
+          if (event === "tool_result") {
+            updateMessage(pendingIndex, (msg) => ({
+              steps: msg.steps.map((step) =>
+                step.id === data.id ? { ...step, status: data.ok ? "ok" : "error", summary: data.summary } : step,
+              ),
+            }));
+          }
+          if (event === "export") {
+            updateMessage(pendingIndex, (msg) => ({ exports: [...msg.exports, data] }));
+          }
+          if (event === "sources") {
+            updateMessage(pendingIndex, () => ({ sources: data.sources || [] }));
+          }
+          if (event === "answer") {
+            updateMessage(pendingIndex, () => ({ answer: data.answer }));
+          }
+        },
+      );
+      setQuestion("");
+    } catch (err) {
+      updateMessage(pendingIndex, () => ({ answer: `Erro: ${err.message}` }));
+    }
+  }
 
   async function handleUpload() {
     if (!selectedFile) {
@@ -83,12 +155,19 @@ export default function App() {
     }
 
     setAsking(true);
+    if (mode === "agent") {
+      await handleAskAgent(cleanQuestion);
+      setAsking(false);
+      return;
+    }
+
     const pendingIndex = Date.now();
 
     setMessages((prev) => [
       ...prev,
       {
         id: pendingIndex,
+        mode: "rag",
         question: cleanQuestion,
         answer: "",
         sources: [],
@@ -230,11 +309,11 @@ export default function App() {
         <p className="eyebrow">RAG Study Lab</p>
         <h1>PDF para conhecimento pesquisável</h1>
         <p>
-          Carrega documentos, indexa no Chroma e pergunta ao teu assistente local
-          com LM Studio.
+          Carrega documentos, indexa no Chroma e pergunta ao assistente, ou deixa o
+          agente pesquisar, calcular e exportar resultados.
         </p>
         <div className="health-badge">
-          API: {health?.status || "..."} | LM Studio: {String(health?.lmstudio)} |
+          API: {health?.status || "..."} | LLM: {String(health?.lmstudio)} |
           Chroma: {String(health?.chroma)}
         </div>
       </header>
@@ -262,6 +341,11 @@ export default function App() {
           messages={messages}
           multiQuery={multiQuery}
           onMultiQueryChange={setMultiQuery}
+          mode={mode}
+          onModeChange={setMode}
+          profiles={profiles}
+          profile={profile}
+          onProfileChange={setProfile}
         />
       </section>
     </main>
