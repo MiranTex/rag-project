@@ -1,62 +1,26 @@
-"""Estrutura de trabalhos académicos (TFC, dissertações) a partir do texto extraído, só com regras.
+"""Estrutura de um documento a partir do texto extraído, só com regras.
 
-Deteta os títulos de secção linha a linha (PT e EN), ignora as linhas do índice e, a partir das secções,
-obtém o resumo, as palavras-chave e as entradas da bibliografia.
+Deteta os títulos de secção linha a linha com os padrões do tipo de documento (ver document_types.py),
+ignora as linhas do índice e, a partir das secções, obtém o resumo, as palavras-chave e a bibliografia.
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-SECTION_LABELS: dict[str, str] = {
-    "front_matter": "Elementos iniciais",
-    "abstract": "Resumo",
-    "introduction": "Introdução",
-    "literature": "Estado da arte",
-    "methodology": "Metodologia",
-    "development": "Desenvolvimento",
-    "results": "Resultados",
-    "conclusion": "Conclusões",
-    "future_work": "Trabalho futuro",
-    "limitations": "Limitações",
-    "references": "Referências",
-    "appendix": "Anexos",
-}
+from backend.services.document_types import CHAPTER, FRONT_MATTER, SectionDef
 
-# A ordem conta: "conclusões e trabalho futuro" é conclusão, "trabalho futuro" sozinho é trabalho futuro.
-_HEADING_PATTERNS: list[tuple[str, str]] = [
-    ("abstract", r"resumo|abstract"),
-    ("introduction", r"introdu[çc][ãa]o|introduction"),
-    (
-        "literature",
-        r"estado d[ao] arte|revis[ãa]o (?:da |de )?literatura|enquadramento te[óo]rico|fundamenta[çc][ãa]o te[óo]rica"
-        r"|trabalhos? relacionados?|related work|literature review|state of the art|background",
-    ),
-    ("methodology", r"metodologia(?: de investiga[çc][ãa]o)?|m[ée]todos?|materiais e m[ée]todos|methodology|methods?"),
-    (
-        "results",
-        r"resultados(?: e discuss[ãa]o)?|(?:an[áa]lise|apresenta[çc][ãa]o) (?:e discuss[ãa]o )?(?:d[eo]s? )?resultados"
-        r"|an[áa]lise e discuss[ãa]o|discuss[ãa]o(?: d[eo]s? resultados)?"
-        r"|avalia[çc][ãa]o|results(?: and discussion)?|discussion|evaluation",
-    ),
-    (
-        "conclusion",
-        r"conclus(?:[ãa]o|[õo]es)(?: e trabalhos? futuros?)?|considera[çc][õo]es finais|conclusions?(?: and future work)?",
-    ),
-    ("future_work", r"trabalhos? futuros?|perspe(?:c)?tivas? futuras?|future work"),
-    ("limitations", r"limita[çc][õo]es(?: do (?:estudo|trabalho))?|limitations"),
-    ("references", r"refer[êe]ncias(?: bibliogr[áa]ficas)?|bibliografia|references|bibliography"),
-    ("appendix", r"(?:anexos?|ap[êe]ndices?|appendix|appendices)(?:\s+(?:[\dIVXLC]+|[A-Z]))?"),
-    (
-        "front_matter",
-        r"agradecimentos|acknowledge?ments|dedicat[óo]ria|[íi]ndice(?: geral)?|sum[áa]rio"
-        r"|lista de (?:figuras|tabelas|quadros|abreviaturas|siglas|acr[óo]nimos)|table of contents|contents",
-    ),
-]
-_HEADINGS = [(section, re.compile(rf"(?:{pattern})", re.IGNORECASE)) for section, pattern in _HEADING_PATTERNS]
+# Comum a todos os tipos: elementos antes do corpo (índice, listas, agradecimentos).
+_FRONT_MATTER = re.compile(
+    r"agradecimentos|acknowledge?ments|dedicat[óo]ria|pref[áa]cio|pre[âa]mbulo|nota pr[ée]via|foreword|preface"
+    r"|[íi]ndice(?: geral)?|sum[áa]rio|lista de (?:figuras|tabelas|quadros|gr[áa]ficos|abreviaturas|siglas|acr[óo]nimos)"
+    r"|table of contents|contents|list of (?:figures|tables)",
+    re.IGNORECASE,
+)
 
 # "Capítulo 2 –", "2.", "5.1" antes do título.
 _NUMBERING = re.compile(r"^(?:(?:cap[íi]tulo|chapter)\s+[\dIVXLC]+\s*[-–—:.]?\s*)?(?:\d{1,2}(?:\.\d{1,2})*\.?\s+)?", re.IGNORECASE)
-# Capítulo numerado que não é nenhuma secção conhecida ("3. Arquitetura do sistema").
+# Capítulo numerado que não é nenhuma secção conhecida ("3. Arquitetura do sistema", "Capítulo 4 — Custos").
 _CHAPTER = re.compile(r"^(?:(?:cap[íi]tulo|chapter)\s+[\dIVXLC]+\b.*|\d{1,2}\.?\s+[A-ZÀ-Ý][^.!?;:]{2,60})$")
 # "CAPÍTULO 2" sozinho numa linha: o título do capítulo vem na linha seguinte.
 _CHAPTER_MARKER = re.compile(r"^(?:cap[íi]tulo|chapter)\s+[\dIVXLC]+\.?$", re.IGNORECASE)
@@ -95,26 +59,31 @@ def _strip_page_counter(line: str) -> str:
     return _PAGE_COUNTER.sub("", line.strip())
 
 
-def classify_heading(line: str, in_toc: bool = False) -> str | None:
-    """Devolve a secção se a linha for um título de secção, ou None. Dentro de um índice (in_toc),
-    linhas que terminam no número da página são entradas do índice e não títulos."""
+def classify_heading(line: str, sections: Sequence[SectionDef] = (), in_toc: bool = False) -> str | None:
+    """Devolve a secção se a linha for um título, ou None. `sections` são as secções do tipo de documento;
+    o índice e os capítulos numerados sem nome conhecido são reconhecidos em qualquer tipo. Dentro de um
+    índice (in_toc), linhas que terminam no número da página são entradas do índice e não títulos."""
     line = _strip_page_counter(line)
     if not line or len(line) > MAX_HEADING_CHARS or _DOT_LEADERS.search(line):
         return None
     if in_toc and _ENDS_WITH_PAGE.search(line):
         return None
     title = _NUMBERING.sub("", line).strip().rstrip(":").strip()
-    for section, pattern in _HEADINGS:
-        if pattern.fullmatch(title):
-            return section
+    for section in sections:
+        if section.pattern.fullmatch(title):
+            return section.key
+    if _FRONT_MATTER.fullmatch(title):
+        return FRONT_MATTER
     if _CHAPTER.match(line):
-        return "development"
+        return CHAPTER
     return None
 
 
-def split_sections(pages: list[tuple[int, str]]) -> tuple[list[Segment], list[Heading]]:
+def split_sections(
+    pages: list[tuple[int, str]], sections: Sequence[SectionDef] = ()
+) -> tuple[list[Segment], list[Heading]]:
     """Divide o texto em segmentos (página, secção). Documentos com menos de MIN_HEADINGS títulos
-    (contratos, faturas...) não têm estrutura de trabalho académico: ficam sem secção."""
+    (cartas, faturas...) não têm estrutura reconhecível: ficam sem secção."""
     headings: list[Heading] = []
     segments: list[Segment] = []
     section: str | None = None
@@ -129,16 +98,16 @@ def split_sections(pages: list[tuple[int, str]]) -> tuple[list[Segment], list[He
                 chapter_marker = _strip_page_counter(line)
                 buffer.append(line)
                 continue
-            found = classify_heading(line, in_toc)
+            found = classify_heading(line, sections, in_toc)
             if chapter_marker:
                 # A linha a seguir a "Capítulo N" é sempre um título, conhecido ou não.
-                found = found or ("development" if len(line.strip()) <= MAX_HEADING_CHARS else None)
+                found = found or (CHAPTER if len(line.strip()) <= MAX_HEADING_CHARS else None)
                 heading_text = f"{chapter_marker} {_strip_page_counter(line)}"
                 chapter_marker = None
             else:
                 heading_text = _strip_page_counter(line)
                 # Linhas numeradas na bibliografia, anexos ou antes do corpo são entradas/listas, não capítulos.
-                if found == "development" and section in ("references", "appendix", "front_matter", None):
+                if found == CHAPTER and section in ("references", "appendix", FRONT_MATTER, None):
                     found = None
             if found is None:
                 buffer.append(line)
@@ -161,7 +130,7 @@ def split_sections(pages: list[tuple[int, str]]) -> tuple[list[Segment], list[He
         return [Segment(s.page, None, s.text) for s in segments], []
     for segment in segments:
         if segment.section is None:
-            segment.section = "front_matter"
+            segment.section = FRONT_MATTER
     return segments, headings
 
 
@@ -212,13 +181,17 @@ _YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
 def find_references(segments: list[Segment], max_entries: int = 500) -> list[str]:
     """Entradas da bibliografia: cada linha que começa como uma referência abre uma entrada nova,
     as restantes continuam a anterior. Só ficam entradas com ano, para descartar cabeçalhos e ruído."""
-    lines = [
-        line.strip()
-        for segment in segments
-        if segment.section == "references"
-        for line in segment.text.splitlines()
-        if line.strip() and classify_heading(line) != "references"
-    ]
+    lines: list[str] = []
+    seen_headings: set[int | None] = set()
+    for segment in segments:
+        if segment.section != "references":
+            continue
+        segment_lines = segment.text.splitlines()
+        # O primeiro segmento de cada título começa pelo próprio título ("Referências").
+        if segment.heading_index not in seen_headings:
+            seen_headings.add(segment.heading_index)
+            segment_lines = segment_lines[1:]
+        lines.extend(line.strip() for line in segment_lines if line.strip())
     entries: list[str] = []
     for line in lines:
         # Uma entrada sem ano ainda vai a meio da lista de autores ("…, Jiang, H.," / "Raat, H., & Zhou, H. (2020)"):

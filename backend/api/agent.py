@@ -68,7 +68,7 @@ def _build_runner(payload: AgentAskRequest, profile: AgentProfile) -> AgentRunne
     return AgentRunner(
         llm=get_lmstudio_client(),
         tools=get_tool_registry().select(profile.tool_names),
-        system_prompt=profile.system_prompt(scope_note),
+        system_prompt=profile.system_prompt(scope_note, settings.knowledge_base_description),
         context=context,
         max_steps=settings.agent_max_steps,
     )

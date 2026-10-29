@@ -39,8 +39,12 @@ class Settings(BaseSettings):
     # Fase de revisão: com auto-aprovação, documentos sem alertas são indexados logo após a extração.
     auto_approve_clean_documents: bool = False
     review_max_garbled_ratio: float = 0.15
-    # Ficha do trabalho (título, autores, ano...) proposta pelo LLM na extração.
+    # Ficha do documento (tipo, título, autores, ano...) proposta pelo LLM na extração.
     metadata_extraction_enabled: bool = True
+    # Tipos de documento desta base de conhecimento (campos da ficha e títulos de secção).
+    document_types_file: str = "backend/document_types.json"
+    # Uma frase sobre esta base de conhecimento, usada nos prompts (guarda, agente, extração da ficha).
+    knowledge_base_description: str = "Base de conhecimento com os documentos da organização."
     rerank_weights_default: str = '{"vector": 0.45, "lexical": 0.20, "keyword": 0.20, "position": 0.10, "density": 0.05}'
     rerank_weights_grounding: str = '{"vector": 0.35, "lexical": 0.25, "keyword": 0.25, "position": 0.10, "density": 0.05}'
 

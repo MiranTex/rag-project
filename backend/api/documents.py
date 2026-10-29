@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from backend.config import get_settings
 from backend.dependencies import (
+    get_document_types,
     get_extraction_store,
     get_keyword_index,
     get_utility_llm,
@@ -21,6 +22,8 @@ from backend.models import (
     DocumentExtraction,
     DocumentInfo,
     DocumentMetadata,
+    DocumentTypeField,
+    DocumentTypeInfo,
     MetadataUpdate,
     PageAlert,
     PageOcrRequest,
@@ -29,10 +32,11 @@ from backend.models import (
     SectionHeading,
     UploadResponse,
 )
-from backend.services.document_structure import SECTION_LABELS, Heading, Segment, find_references, split_sections
+from backend.services.document_structure import Heading, Segment, find_references, split_sections
+from backend.services.document_types import DocumentType, section_label
 from backend.services.embeddings import embed_texts
 from backend.services.extraction_review import validate_page
-from backend.services.metadata_extraction import propose_metadata
+from backend.services.metadata_extraction import clean_fields, propose_metadata
 from backend.services.ocr import ocr_image, render_page
 from backend.services.pdf_ingestion import (
     chunk_pages,
@@ -83,28 +87,40 @@ def _with_counts(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
 
 
 def _with_metadata(info: DocumentInfo, metadata: DocumentMetadata) -> DocumentInfo:
-    return info.model_copy(update={"title": metadata.title, "year": metadata.year})
+    return info.model_copy(update={"title": metadata.title, "year": metadata.year, "document_type": metadata.document_type})
 
 
-def _structure(pages: list[ReviewPage]) -> tuple[list[Segment], list[Heading]]:
-    """Secções do texto revisto: só páginas incluídas e com texto."""
-    return split_sections([(page.page, page.text) for page in pages if not page.excluded and page.text.strip()])
+def _document_type(metadata: DocumentMetadata) -> DocumentType:
+    return get_document_types().get(metadata.document_type)
+
+
+def _structure(pages: list[ReviewPage], doc_type: DocumentType) -> tuple[list[Segment], list[Heading]]:
+    """Secções do texto revisto (só páginas incluídas e com texto), com os títulos do tipo de documento."""
+    included = [(page.page, page.text) for page in pages if not page.excluded and page.text.strip()]
+    return split_sections(included, doc_type.sections)
 
 
 def _propose_metadata(pages: list[ReviewPage]) -> DocumentMetadata:
-    segments, headings = _structure(pages)
-    llm = get_utility_llm() if get_settings().metadata_extraction_enabled else None
-    return propose_metadata([(page.page, page.text) for page in pages if page.text.strip()], segments, headings, llm)
+    settings = get_settings()
+    llm = get_utility_llm() if settings.metadata_extraction_enabled else None
+    return propose_metadata(
+        [(page.page, page.text) for page in pages if page.text.strip()],
+        get_document_types(),
+        llm,
+        settings.knowledge_base_description,
+    )
 
 
 def _build_extraction(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentExtraction:
-    segments, headings = _structure(pages)
+    metadata = get_extraction_store().load_metadata(info.document_id)
+    doc_type = _document_type(metadata)
+    segments, headings = _structure(pages, doc_type)
     return DocumentExtraction(
         document=info,
         pages=pages,
-        metadata=get_extraction_store().load_metadata(info.document_id),
+        metadata=metadata,
         sections=[
-            SectionHeading(section=h.section, label=SECTION_LABELS[h.section], page=h.page, text=h.text)
+            SectionHeading(section=h.section, label=section_label(doc_type, h.section), page=h.page, text=h.text)
             for h in headings
         ],
         references=find_references(segments),
@@ -163,6 +179,7 @@ def _extract_for_review(document_id: str, filename: str, raw: bytes) -> tuple[Do
             status="pending_review",
             title=metadata.title,
             year=metadata.year,
+            document_type=metadata.document_type,
         ),
         pages,
     )
@@ -190,7 +207,9 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
         raise HTTPException(status_code=400, detail="Nenhuma página com texto para indexar.")
 
     pages_by_number = {page.page: page for page in included}
-    segments, headings = _structure(pages)
+    store = get_extraction_store()
+    doc_type = _document_type(store.load_metadata(info.document_id))
+    segments, headings = _structure(pages, doc_type)
     chunks = chunk_pages(
         pages=[(segment.page, segment.text, segment.section) for segment in segments],
         document_id=info.document_id,
@@ -214,16 +233,17 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
     vector_store.delete_document(info.document_id)
 
     # As referências gravadas são as do texto aprovado (incluindo correções feitas na revisão).
-    store = get_extraction_store()
     document_metadata = store.load_metadata(info.document_id).model_copy(update={"references": find_references(segments)})
     store.save_metadata(info.document_id, document_metadata)
     # O Chroma só aceita valores escalares e não aceita None: só entram os campos preenchidos.
+    # Dos campos próprios do tipo, só os marcados como filterable (servem para filtrar pesquisas).
     document_fields = {
         key: value
         for key, value in {
+            "document_type": doc_type.key,
             "title": document_metadata.title,
             "year": document_metadata.year,
-            "course": document_metadata.course,
+            **{f.key: document_metadata.fields.get(f.key) for f in doc_type.fields if f.filterable},
         }.items()
         if value
     }
@@ -454,22 +474,43 @@ def _clean_text_list(values: list[str]) -> list[str]:
     return [" ".join(value.split()) for value in values if value.strip()]
 
 
+@router.get("/types", response_model=list[DocumentTypeInfo])
+def list_document_types() -> list[DocumentTypeInfo]:
+    """Tipos de documento configurados, para o formulário da ficha (o primeiro é o tipo por defeito)."""
+    types = get_document_types()
+    ordered = [types.types[types.default]] + [t for key, t in types.types.items() if key != types.default]
+    return [
+        DocumentTypeInfo(
+            key=t.key,
+            label=t.label,
+            description=t.description,
+            fields=[DocumentTypeField(key=f.key, label=f.label, type=f.kind, hint=f.hint, filterable=f.filterable) for f in t.fields],
+            sections=[{"key": sec.key, "label": sec.label} for sec in t.sections],
+        )
+        for t in ordered
+    ]
+
+
 @router.put("/{document_id}/metadata", response_model=DocumentExtraction)
 def update_metadata(document_id: str, payload: MetadataUpdate) -> DocumentExtraction:
     with _locked(document_id):
         info, pages = _get_document_and_pages(document_id)
         _require_pending(info)
+        types = get_document_types()
+        if payload.document_type and payload.document_type not in types.types:
+            raise HTTPException(status_code=422, detail=f"Tipo de documento desconhecido: {payload.document_type}")
+        doc_type = types.get(payload.document_type)
         store = get_extraction_store()
         metadata = store.load_metadata(document_id).model_copy(
             update={
+                "document_type": doc_type.key,
                 "title": " ".join(payload.title.split()),
                 "authors": _clean_text_list(payload.authors),
-                "advisors": _clean_text_list(payload.advisors),
                 "year": payload.year,
-                "course": " ".join(payload.course.split()),
-                "institution": " ".join(payload.institution.split()),
                 "keywords": _clean_text_list(payload.keywords),
                 "abstract": payload.abstract.strip(),
+                # Ao mudar de tipo, os campos que o novo tipo não tem desaparecem.
+                "fields": clean_fields(doc_type, payload.fields),
             }
         )
         store.save_metadata(document_id, metadata)
@@ -492,12 +533,20 @@ async def suggest_metadata(document_id: str) -> DocumentExtraction:
             proposed = _propose_metadata(pages)
             if not proposed.auto_filled:
                 raise HTTPException(status_code=502, detail="Não foi possível obter uma proposta do modelo.")
+            # O tipo só muda se nunca houve proposta do modelo (ficou o tipo por defeito).
+            document_type = current.document_type if current.auto_filled and current.document_type else proposed.document_type
             filled = {
                 field: getattr(proposed, field)
-                for field in ("title", "authors", "advisors", "year", "course", "institution", "keywords", "abstract")
+                for field in ("title", "authors", "year", "keywords", "abstract")
                 if not getattr(current, field) and getattr(proposed, field)
             }
-            metadata = current.model_copy(update={**filled, "auto_filled": True})
+            fields = dict(current.fields) if document_type == current.document_type else {}
+            for key, value in proposed.fields.items():
+                fields.setdefault(key, value)
+            doc_type = get_document_types().get(document_type)
+            metadata = current.model_copy(
+                update={**filled, "document_type": doc_type.key, "fields": clean_fields(doc_type, fields), "auto_filled": True}
+            )
             store.save_metadata(document_id, metadata)
             info = _with_metadata(info, metadata)
             get_registry().add_or_replace(info)

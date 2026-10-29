@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, X } from "lucide-react";
-import { approveDocument, getExtraction, rerunPageOcr, suggestMetadata, updateMetadata, updatePage } from "../api";
+import {
+  approveDocument,
+  getDocumentTypes,
+  getExtraction,
+  rerunPageOcr,
+  suggestMetadata,
+  updateMetadata,
+  updatePage,
+} from "../api";
 import { MetadataCard, StructureCard, fromDraft, toDraft } from "./ReviewDetails";
 
 const SOURCE_LABELS = {
@@ -124,10 +132,12 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
   const [working, setWorking] = useState("A carregar…");
   const [onlyAlerts, setOnlyAlerts] = useState(false);
   const [metaDraft, setMetaDraft] = useState(null);
+  const [types, setTypes] = useState([]);
 
   useEffect(() => {
-    getExtraction(documentId)
-      .then((data) => {
+    Promise.all([getExtraction(documentId), getDocumentTypes()])
+      .then(([data, documentTypes]) => {
+        setTypes(documentTypes);
         setExtraction(data);
         setMetaDraft(toDraft(data.metadata));
         setOnlyAlerts(data.document.alert_count > 0 && data.pages.length > 5);
@@ -163,7 +173,7 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
     setWorking("A indexar…");
     setError("");
     try {
-      if (metaDirty) await updateMetadata(documentId, fromDraft(metaDraft));
+      if (metaDirty) await updateMetadata(documentId, draftPayload());
       const result = await approveDocument(documentId);
       onApproved(result.message);
     } catch (err) {
@@ -179,11 +189,16 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
     );
   }
 
+  const typeOf = (key) => types.find((t) => t.key === key) || types[0];
+  const draftPayload = () => fromDraft(metaDraft, typeOf(metaDraft.document_type));
+
   const busy = !!working;
   const metaDirty =
     !!extraction &&
     !!metaDraft &&
-    JSON.stringify(fromDraft(metaDraft)) !== JSON.stringify(fromDraft(toDraft(extraction.metadata)));
+    types.length > 0 &&
+    JSON.stringify(draftPayload()) !==
+      JSON.stringify(fromDraft(toDraft(extraction.metadata), typeOf(extraction.metadata.document_type)));
   const doc = extraction?.document;
   const pages = extraction?.pages || [];
   const readOnly = doc?.status !== "pending_review";
@@ -251,10 +266,11 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
               {working}
             </p>
           )}
-          {extraction && metaDraft && (
+          {extraction && metaDraft && types.length > 0 && (
             <>
               <MetadataCard
                 metadata={extraction.metadata}
+                types={types}
                 draft={metaDraft}
                 onDraftChange={setMetaDraft}
                 dirty={metaDirty}
@@ -262,14 +278,14 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
                 busy={busy}
                 suggesting={working === "A preencher a ficha…"}
                 onSave={() =>
-                  run("A guardar a ficha…", () => updateMetadata(documentId, fromDraft(metaDraft)), { syncMeta: true })
+                  run("A guardar a ficha…", () => updateMetadata(documentId, draftPayload()), { syncMeta: true })
                 }
                 onSuggest={() =>
                   run(
                     "A preencher a ficha…",
                     async () => {
                       // Guarda primeiro o que foi escrito: a sugestão só preenche campos vazios no servidor.
-                      if (metaDirty) await updateMetadata(documentId, fromDraft(metaDraft));
+                      if (metaDirty) await updateMetadata(documentId, draftPayload());
                       return suggestMetadata(documentId);
                     },
                     { syncMeta: true },

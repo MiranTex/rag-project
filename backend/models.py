@@ -19,6 +19,7 @@ class DocumentInfo(BaseModel):
     # Resumo da ficha (ver DocumentMetadata) para a listagem; a ficha completa fica com a extração.
     title: str = ""
     year: int | None = None
+    document_type: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -41,31 +42,49 @@ class ReviewPage(BaseModel):
     edited: bool = False
 
 
-class DocumentMetadata(BaseModel):
-    """Ficha de um trabalho académico. Proposta na extração (regras + LLM) e confirmada na revisão."""
+FieldValue = str | list[str]
 
+
+class DocumentMetadata(BaseModel):
+    """Ficha de um documento: núcleo comum a todos os tipos + campos próprios do tipo (ver document_types.json).
+    Proposta na extração (regras + LLM) e confirmada na revisão."""
+
+    document_type: str = ""
     title: str = ""
     authors: list[str] = Field(default_factory=list)
-    advisors: list[str] = Field(default_factory=list)
     year: int | None = Field(default=None, ge=1900, le=2100)
-    course: str = ""
-    institution: str = ""
     keywords: list[str] = Field(default_factory=list)
     abstract: str = ""
+    fields: dict[str, FieldValue] = Field(default_factory=dict)
     # Só gravadas na aprovação, a partir do texto revisto (ver GET /extraction para a versão atual).
     references: list[str] = Field(default_factory=list)
     auto_filled: bool = False
 
 
 class MetadataUpdate(BaseModel):
+    document_type: str = ""
     title: str = ""
     authors: list[str] = Field(default_factory=list)
-    advisors: list[str] = Field(default_factory=list)
     year: int | None = Field(default=None, ge=1900, le=2100)
-    course: str = ""
-    institution: str = ""
     keywords: list[str] = Field(default_factory=list)
     abstract: str = ""
+    fields: dict[str, FieldValue] = Field(default_factory=dict)
+
+
+class DocumentTypeField(BaseModel):
+    key: str
+    label: str
+    type: Literal["text", "list", "people"]
+    hint: str = ""
+    filterable: bool = False
+
+
+class DocumentTypeInfo(BaseModel):
+    key: str
+    label: str
+    description: str
+    fields: list[DocumentTypeField]
+    sections: list[dict[str, str]]
 
 
 class SectionHeading(BaseModel):

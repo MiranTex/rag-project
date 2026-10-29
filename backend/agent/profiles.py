@@ -2,12 +2,13 @@ from dataclasses import dataclass
 from datetime import date
 
 BASE_PROMPT = """
-És um assistente que trabalha sobre os documentos indexados do utilizador. Responde sempre em PT-PT.
+És um assistente que trabalha sobre os documentos indexados de uma base de conhecimento. Responde sempre em PT-PT.
+Sobre esta base de conhecimento: {knowledge_base}
 
 Regras:
 - Factos sobre os documentos vêm sempre das tools (search_documents, read_document). Nunca inventes nem completes com conhecimento geral.
 - Usa as palavras exatas do documento para cargos, nomes, valores e datas. Se não encontrares a informação, diz claramente.
-- Se a primeira pesquisa não chegar, pesquisa de novo com outros termos (sinónimos, termos jurídicos, números).
+- Se a primeira pesquisa não chegar, pesquisa de novo com outros termos (sinónimos, termos técnicos, números).
 - Contas e datas: usa sempre as tools de cálculo (calculate, percentage_change, date_difference, date_add). Nunca calcules de cabeça.
 - Cita a origem de cada facto no formato [ficheiro, p.X].
 - Sê objetivo: resposta curta primeiro, detalhes depois se forem úteis.
@@ -36,8 +37,9 @@ class AgentProfile:
     tool_names: list[str] | None = None  # None = todas as tools
     blocked_categories: frozenset[str] = frozenset({"fora_do_ambito"})  # categorias do guarda (ver guard.py)
 
-    def system_prompt(self, scope_note: str | None = None) -> str:
-        parts = [BASE_PROMPT.format(today=date.today().isoformat()), self.instructions]
+    def system_prompt(self, scope_note: str | None = None, knowledge_base: str = "") -> str:
+        base = BASE_PROMPT.format(today=date.today().isoformat(), knowledge_base=knowledge_base or "(sem descrição)")
+        parts = [base, self.instructions]
         if scope_note:
             parts.append(scope_note)
         return "\n\n".join(part for part in parts if part)

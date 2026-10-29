@@ -106,6 +106,12 @@ export async function rerunPageOcr(documentId, page, dpi = null) {
   return data;
 }
 
+export async function getDocumentTypes() {
+  const res = await fetch(`${API_BASE}/documents/types`);
+  if (!res.ok) throw new Error("Falha ao carregar os tipos de documento");
+  return res.json();
+}
+
 export async function updateMetadata(documentId, metadata) {
   const res = await fetch(`${API_BASE}/documents/${documentId}/metadata`, {
     method: "PUT",

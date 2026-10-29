@@ -82,12 +82,11 @@ class _FakeKeywordIndex:
 class _FakeLLM:
     def complete(self, messages, tools=None, tool_choice=None, temperature=0.2):
         arguments = {
+            "document_type": "academic",
             "title": "Recomendação de Livros",
             "authors": ["Ana Martins"],
-            "advisors": [],
             "year": 2024,
             "course": "Engenharia Informática",
-            "institution": "",
             "keywords": [],
         }
         return {"tool_calls": [{"function": {"arguments": json.dumps(arguments)}}]}
@@ -222,13 +221,18 @@ def test_metadata_and_sections_flow_into_indexed_chunks(env):
     assert extraction["references"] == ["Silva, J. (2020). Sistemas de recomendação. Lisboa: Editora."]
 
     # A sugestão só preenche campos vazios: o curso escrito à mão mantém-se.
-    client.put(f"/documents/{doc_id}/metadata", json={"course": "Licenciatura em EI", "keywords": [" a ", ""]})
+    client.put(
+        f"/documents/{doc_id}/metadata",
+        json={"document_type": "academic", "fields": {"course": "Licenciatura em EI", "department": "x"}, "keywords": [" a ", ""]},
+    )
     extraction = client.post(f"/documents/{doc_id}/metadata/suggest").json()
     metadata = extraction["metadata"]
     assert metadata["title"] == "Recomendação de Livros" and metadata["year"] == 2024
-    assert metadata["course"] == "Licenciatura em EI"
+    # "department" é de outro tipo e foi descartado.
+    assert metadata["fields"] == {"course": "Licenciatura em EI"}
     assert metadata["keywords"] == ["a"]
     assert extraction["document"]["title"] == "Recomendação de Livros"
+    assert extraction["document"]["document_type"] == "academic"
 
     res = client.post(f"/documents/{doc_id}/approve")
     assert res.json()["document"]["year"] == 2024
@@ -236,7 +240,23 @@ def test_metadata_and_sections_flow_into_indexed_chunks(env):
     chunks = [c["metadata"] for c in env["vectors"].chunks.values()]
     assert {c["section"] for c in chunks} == {"abstract", "introduction", "conclusion", "references"}
     assert all(c["title"] == "Recomendação de Livros" and c["year"] == 2024 for c in chunks)
+    assert all(c["document_type"] == "academic" and c["course"] == "Licenciatura em EI" for c in chunks)
     assert env["store"].load_metadata(doc_id).references == [
         "Silva, J. (2020). Sistemas de recomendação. Lisboa: Editora."
     ]
     assert client.put(f"/documents/{doc_id}/metadata", json={"title": "x"}).status_code == 409
+
+
+def test_unknown_document_type_is_rejected(env):
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    res = env["client"].put(f"/documents/{doc_id}/metadata", json={"document_type": "receita"})
+    assert res.status_code == 422
+
+
+def test_document_types_endpoint_lists_default_first(env):
+    types = env["client"].get("/documents/types").json()
+    assert types[0]["key"] == "generic"
+    academic = next(t for t in types if t["key"] == "academic")
+    assert {"key": "course", "label": "Curso", "type": "text", "filterable": True}.items() <= next(
+        f for f in academic["fields"] if f["key"] == "course"
+    ).items()

@@ -2,31 +2,38 @@ import { useState } from "react";
 import { ChevronRight, FileSearch, Loader2 } from "lucide-react";
 
 // Listas editam-se como texto separado por ";" (nomes como "Silva, J." levam vírgula).
+const joinList = (values) => (Array.isArray(values) ? values.join("; ") : values || "");
+const splitList = (text) => text.split(";").map((item) => item.trim()).filter(Boolean);
+
 export function toDraft(metadata) {
   return {
+    document_type: metadata.document_type || "",
     title: metadata.title || "",
-    authors: (metadata.authors || []).join("; "),
-    advisors: (metadata.advisors || []).join("; "),
+    authors: joinList(metadata.authors),
     year: metadata.year ?? "",
-    course: metadata.course || "",
-    institution: metadata.institution || "",
-    keywords: (metadata.keywords || []).join("; "),
+    keywords: joinList(metadata.keywords),
     abstract: metadata.abstract || "",
+    fields: Object.fromEntries(Object.entries(metadata.fields || {}).map(([key, value]) => [key, joinList(value)])),
   };
 }
 
-export function fromDraft(draft) {
-  const list = (text) => text.split(";").map((item) => item.trim()).filter(Boolean);
+// Só os campos do tipo escolhido; o backend volta a validar.
+export function fromDraft(draft, docType) {
   const year = Number.parseInt(draft.year, 10);
+  const fields = {};
+  for (const field of docType?.fields || []) {
+    const raw = (draft.fields[field.key] || "").trim();
+    if (!raw) continue;
+    fields[field.key] = field.type === "text" ? raw : splitList(raw);
+  }
   return {
+    document_type: draft.document_type,
     title: draft.title,
-    authors: list(draft.authors),
-    advisors: list(draft.advisors),
+    authors: splitList(draft.authors),
     year: Number.isFinite(year) ? year : null,
-    course: draft.course,
-    institution: draft.institution,
-    keywords: list(draft.keywords),
+    keywords: splitList(draft.keywords),
     abstract: draft.abstract,
+    fields,
   };
 }
 
@@ -45,29 +52,40 @@ function Field({ label, hint, className = "", children }) {
   );
 }
 
-function ReadOnlyValue({ label, value }) {
+function ReadOnlyValue({ label, value, className = "" }) {
   return (
-    <div>
+    <div className={className}>
       <dt className="text-xs font-medium text-stone-500 dark:text-stone-400">{label}</dt>
-      <dd className="mt-0.5 text-sm text-stone-800 dark:text-stone-200">{value || <span className="text-stone-400 dark:text-stone-500">—</span>}</dd>
+      <dd className="mt-0.5 text-sm text-stone-800 dark:text-stone-200">
+        {value || <span className="text-stone-400 dark:text-stone-500">—</span>}
+      </dd>
     </div>
   );
 }
 
-export function MetadataCard({ metadata, draft, onDraftChange, dirty, readOnly, busy, suggesting, onSave, onSuggest }) {
-  const set = (field) => (e) => onDraftChange({ ...draft, [field]: e.target.value });
+function fieldHint(field) {
+  const parts = [];
+  if (field.type !== "text") parts.push("separados por ;");
+  if (field.hint) parts.push(field.hint);
+  return parts.join(" · ");
+}
+
+export function MetadataCard({ metadata, types, draft, onDraftChange, dirty, readOnly, busy, suggesting, onSave, onSuggest }) {
+  const set = (key) => (e) => onDraftChange({ ...draft, [key]: e.target.value });
+  const setField = (key) => (e) => onDraftChange({ ...draft, fields: { ...draft.fields, [key]: e.target.value } });
+  const docType = types.find((t) => t.key === (readOnly ? metadata.document_type : draft.document_type)) || types[0];
   const empty = !metadata.title && !metadata.authors?.length && !metadata.year;
 
   return (
     <section className="rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
       <header className="flex flex-wrap items-center gap-2 border-b border-stone-100 px-4 py-2.5 dark:border-stone-800">
-        <h3 className="font-medium">Ficha do trabalho</h3>
+        <h3 className="font-medium">Ficha do documento</h3>
         {!readOnly && (
           <button
             type="button"
             onClick={onSuggest}
             disabled={busy}
-            title="Pede ao modelo para preencher os campos vazios a partir da capa e do resumo"
+            title="Pede ao modelo para preencher os campos vazios a partir das primeiras páginas"
             className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-stone-600 hover:bg-stone-100 disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800"
           >
             {suggesting ? <Loader2 className="size-3.5 animate-spin" /> : <FileSearch className="size-3.5" />}
@@ -84,39 +102,41 @@ export function MetadataCard({ metadata, draft, onDraftChange, dirty, readOnly, 
 
       {readOnly ? (
         <dl className="grid gap-4 px-4 py-3 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <ReadOnlyValue label="Título" value={metadata.title} />
-          </div>
-          <ReadOnlyValue label="Autores" value={metadata.authors?.join("; ")} />
-          <ReadOnlyValue label="Orientadores" value={metadata.advisors?.join("; ")} />
-          <ReadOnlyValue label="Curso" value={metadata.course} />
-          <ReadOnlyValue label="Instituição" value={metadata.institution} />
+          <ReadOnlyValue label="Tipo" value={docType?.label} />
           <ReadOnlyValue label="Ano" value={metadata.year} />
-          <ReadOnlyValue label="Palavras-chave" value={metadata.keywords?.join("; ")} />
-          <div className="sm:col-span-2">
-            <ReadOnlyValue label="Resumo" value={metadata.abstract} />
-          </div>
+          <ReadOnlyValue className="sm:col-span-2" label="Título" value={metadata.title} />
+          <ReadOnlyValue label="Autores" value={joinList(metadata.authors)} />
+          {docType?.fields.map((field) => (
+            <ReadOnlyValue key={field.key} label={field.label} value={joinList(metadata.fields?.[field.key])} />
+          ))}
+          <ReadOnlyValue className="sm:col-span-2" label="Palavras-chave" value={joinList(metadata.keywords)} />
+          <ReadOnlyValue className="sm:col-span-2" label="Resumo" value={metadata.abstract} />
         </dl>
       ) : (
         <div className="grid gap-3 px-4 py-3 sm:grid-cols-6">
-          <Field label="Título" className="sm:col-span-6">
-            <input className={input} value={draft.title} onChange={set("title")} placeholder="Não encontrado" />
-          </Field>
-          <Field label="Autores" hint="separados por ;" className="sm:col-span-3">
-            <input className={input} value={draft.authors} onChange={set("authors")} />
-          </Field>
-          <Field label="Orientadores" hint="separados por ;" className="sm:col-span-3">
-            <input className={input} value={draft.advisors} onChange={set("advisors")} />
-          </Field>
-          <Field label="Curso" className="sm:col-span-3">
-            <input className={input} value={draft.course} onChange={set("course")} />
-          </Field>
-          <Field label="Instituição" className="sm:col-span-2">
-            <input className={input} value={draft.institution} onChange={set("institution")} />
+          <Field label="Tipo de documento" hint={docType?.description} className="sm:col-span-5">
+            <select className={input} value={docType?.key || ""} onChange={set("document_type")}>
+              {types.map((t) => (
+                <option key={t.key} value={t.key}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
           </Field>
           <Field label="Ano" className="sm:col-span-1">
             <input className={input} value={draft.year} onChange={set("year")} inputMode="numeric" maxLength={4} />
           </Field>
+          <Field label="Título" className="sm:col-span-6">
+            <input className={input} value={draft.title} onChange={set("title")} placeholder="Não encontrado" />
+          </Field>
+          <Field label="Autores" hint="separados por ;" className="sm:col-span-6">
+            <input className={input} value={draft.authors} onChange={set("authors")} />
+          </Field>
+          {docType?.fields.map((field) => (
+            <Field key={field.key} label={field.label} hint={fieldHint(field)} className="sm:col-span-3">
+              <input className={input} value={draft.fields[field.key] || ""} onChange={setField(field.key)} />
+            </Field>
+          ))}
           <Field label="Palavras-chave" hint="separadas por ;" className="sm:col-span-6">
             <input className={input} value={draft.keywords} onChange={set("keywords")} />
           </Field>

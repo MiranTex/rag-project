@@ -1,0 +1,59 @@
+{
+  "_comment": "Tipos de documento desta base de conhecimento. Cada instituição adapta este ficheiro (ou aponta DOCUMENT_TYPES_FILE para outro). fields: campos próprios do tipo, além de título, autores, ano, palavras-chave e resumo, que todos têm. type: text | list | people (lista de nomes, sem títulos como Prof. ou Dr.). filterable: o campo vai para os metadados de cada excerto e pode filtrar pesquisas (só text). sections: títulos reconhecidos linha a linha (regex Python, sem maiúsculas/minúsculas, comparada com a linha inteira sem numeração). As chaves abstract e references ativam a extração do resumo e da bibliografia.",
+  "default": "generic",
+  "types": {
+    "generic": {
+      "label": "Documento",
+      "description": "Relatórios, manuais, atas, apresentações e outros documentos sem tipo próprio.",
+      "fields": [
+        {"key": "organization", "label": "Entidade", "type": "text", "hint": "organização, departamento ou equipa responsável", "filterable": true}
+      ],
+      "sections": [
+        {"key": "abstract", "label": "Resumo", "patterns": ["resumo", "sum[áa]rio executivo", "abstract", "executive summary", "summary"]},
+        {"key": "introduction", "label": "Introdução", "patterns": ["introdu[çc][ãa]o", "enquadramento", "introduction", "background"]},
+        {"key": "conclusion", "label": "Conclusões", "patterns": ["conclus(?:[ãa]o|[õo]es)", "considera[çc][õo]es finais", "recomenda[çc][õo]es", "conclusions?", "recommendations"]},
+        {"key": "references", "label": "Referências", "patterns": ["refer[êe]ncias(?: bibliogr[áa]ficas)?", "bibliografia", "references", "bibliography"]},
+        {"key": "appendix", "label": "Anexos", "patterns": ["(?:anexos?|ap[êe]ndices?|appendix|appendices)(?:\\s+(?:[\\dIVXLC]+|[A-Z]))?"]}
+      ]
+    },
+    "academic": {
+      "label": "Trabalho académico",
+      "description": "Trabalhos finais de curso, dissertações, teses e relatórios de estágio.",
+      "fields": [
+        {"key": "advisors", "label": "Orientadores", "type": "people", "hint": "orientadores e coorientadores"},
+        {"key": "course", "label": "Curso", "type": "text", "hint": "curso ou grau, ex.: Licenciatura em Engenharia Informática", "filterable": true},
+        {"key": "institution", "label": "Instituição", "type": "text", "filterable": true}
+      ],
+      "sections": [
+        {"key": "abstract", "label": "Resumo", "patterns": ["resumo", "abstract"]},
+        {"key": "introduction", "label": "Introdução", "patterns": ["introdu[çc][ãa]o", "introduction"]},
+        {"key": "literature", "label": "Estado da arte", "patterns": ["estado d[ao] arte", "revis[ãa]o (?:da |de )?literatura", "enquadramento te[óo]rico", "fundamenta[çc][ãa]o te[óo]rica", "trabalhos? relacionados?", "related work", "literature review", "state of the art", "background"]},
+        {"key": "methodology", "label": "Metodologia", "patterns": ["metodologia(?: de investiga[çc][ãa]o)?", "m[ée]todos?", "materiais e m[ée]todos", "methodology", "methods?"]},
+        {"key": "results", "label": "Resultados", "patterns": ["resultados(?: e discuss[ãa]o)?", "(?:an[áa]lise|apresenta[çc][ãa]o) (?:e discuss[ãa]o )?(?:d[eo]s? )?resultados", "an[áa]lise e discuss[ãa]o", "discuss[ãa]o(?: d[eo]s? resultados)?", "avalia[çc][ãa]o", "results(?: and discussion)?", "discussion", "evaluation"]},
+        {"key": "conclusion", "label": "Conclusões", "patterns": ["conclus(?:[ãa]o|[õo]es)(?: e trabalhos? futuros?)?", "considera[çc][õo]es finais", "conclusions?(?: and future work)?"]},
+        {"key": "future_work", "label": "Trabalho futuro", "patterns": ["trabalhos? futuros?", "perspe(?:c)?tivas? futuras?", "future work"]},
+        {"key": "limitations", "label": "Limitações", "patterns": ["limita[çc][õo]es(?: do (?:estudo|trabalho))?", "limitations"]},
+        {"key": "references", "label": "Referências", "patterns": ["refer[êe]ncias(?: bibliogr[áa]ficas)?", "bibliografia", "references", "bibliography"]},
+        {"key": "appendix", "label": "Anexos", "patterns": ["(?:anexos?|ap[êe]ndices?|appendix|appendices)(?:\\s+(?:[\\dIVXLC]+|[A-Z]))?"]}
+      ]
+    },
+    "procedure": {
+      "label": "Procedimento",
+      "description": "Procedimentos, normas internas, políticas e instruções de trabalho.",
+      "fields": [
+        {"key": "code", "label": "Código", "type": "text", "hint": "referência interna, ex.: PR-07"},
+        {"key": "department", "label": "Área responsável", "type": "text", "filterable": true},
+        {"key": "version", "label": "Versão", "type": "text"}
+      ],
+      "sections": [
+        {"key": "purpose", "label": "Objetivo", "patterns": ["objetivos?", "objectivos?", "finalidade", "purpose", "scope and purpose"]},
+        {"key": "scope", "label": "Âmbito", "patterns": ["[âa]mbito(?: de aplica[çc][ãa]o)?", "campo de aplica[çc][ãa]o", "scope"]},
+        {"key": "definitions", "label": "Definições", "patterns": ["defini[çc][õo]es(?: e abreviaturas)?", "termos e defini[çc][õo]es", "gloss[áa]rio", "definitions"]},
+        {"key": "responsibilities", "label": "Responsabilidades", "patterns": ["responsabilidades", "responsibilities"]},
+        {"key": "procedure", "label": "Procedimento", "patterns": ["procedimentos?", "descri[çc][ãa]o do procedimento", "modo de proceder", "procedure"]},
+        {"key": "references", "label": "Referências", "patterns": ["refer[êe]ncias", "documentos (?:de refer[êe]ncia|relacionados)", "references"]},
+        {"key": "appendix", "label": "Anexos", "patterns": ["(?:anexos?|ap[êe]ndices?|appendix)(?:\\s+(?:[\\dIVXLC]+|[A-Z]))?"]}
+      ]
+    }
+  }
+}

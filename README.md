@@ -392,47 +392,63 @@ Com `AUTO_APPROVE_CLEAN_DOCUMENTS=true`, os documentos sem alertas saltam o pass
 
 Só se edita um documento `pending_review`. Para rever um documento já indexado, usar reindex: volta a extrair do zero (as edições manuais perdem-se) e o documento sai do índice até nova aprovação. Documentos indexados antes desta fase não têm extração guardada; aparecem como indexados e precisam de reindex para serem revistos.
 
-## Aula 14: Ficha do trabalho e secções
+## Aula 14: Ficha do documento, tipos e secções
 
-Para um corpus de trabalhos finais de curso, cada documento passa a ter uma ficha e cada excerto passa a saber de que secção vem. Tudo é proposto na extração e confirmado no ecrã de revisão.
+Cada documento passa a ter uma ficha e cada excerto passa a saber de que secção vem. Tudo é proposto na extração e confirmado no ecrã de revisão.
 
-**Secções por regras** (`backend/services/document_structure.py`): os títulos são reconhecidos linha a linha, em PT e EN, com ou sem numeração ("2.", "5.1", "Capítulo 3"):
+O sistema não é específico de nenhum domínio. Cada instituição define os seus **tipos de documento** em `backend/document_types.json`, ou noutro ficheiro indicado em `DOCUMENT_TYPES_FILE`. O ficheiro de exemplo traz três tipos:
 
-| Secção | Exemplos de título |
-|---|---|
-| `abstract` | Resumo, Abstract |
-| `introduction` | Introdução |
-| `literature` | Estado da arte, Revisão da literatura, Enquadramento teórico |
-| `methodology` | Metodologia, Métodos |
-| `development` | Qualquer capítulo numerado sem nome conhecido ("3 Arquitetura do sistema") |
-| `results` | Resultados, Apresentação e discussão dos resultados |
-| `conclusion` | Conclusões, Considerações finais |
-| `future_work` | Trabalho futuro |
-| `limitations` | Limitações |
-| `references` | Referências, Bibliografia |
-| `appendix` | Anexos, Apêndice B |
-| `front_matter` | Capa, agradecimentos, índice, listas |
+| Tipo | Campos próprios | Secções reconhecidas |
+|---|---|---|
+| `generic` (Documento, o tipo por defeito) | Entidade | Resumo, Introdução, Conclusões, Referências, Anexos |
+| `academic` (Trabalho académico) | Orientadores, Curso, Instituição | Resumo, Introdução, Estado da arte, Metodologia, Resultados, Conclusões, Trabalho futuro, Limitações, Referências, Anexos |
+| `procedure` (Procedimento) | Código, Área responsável, Versão | Objetivo, Âmbito, Definições, Responsabilidades, Procedimento, Referências, Anexos |
 
-- As entradas do índice (reticências, ou "Título 12" depois de um título "Índice") não contam como títulos.
-- O contador de página que o pypdf cola à primeira linha ("16/80 2 COVID – 19") é ignorado.
-- Com menos de 2 títulos (contratos, faturas...), o documento fica sem secções.
-- A extração passou a preservar as quebras de linha, porque os títulos só se reconhecem linha a linha.
+Para outro domínio (contratos, atas, relatórios de auditoria...), acrescenta-se um tipo ao ficheiro:
 
-**Ficha** (`backend/services/metadata_extraction.py`):
-- Resumo, palavras-chave e referências saem do texto por regras.
-- Título, autores, orientadores, ano, curso e instituição são propostos pelo modelo pequeno (`GUARD_MODEL`, o mesmo da guarda), a partir das 3 primeiras páginas. Este modelo aceita `tool_choice` forçado, que alguns modelos de chat recusam.
-- Se o modelo falhar, a ficha fica por preencher e pode ser escrita à mão ou pedida de novo.
+```json
+"minutes": {
+  "label": "Ata",
+  "description": "Atas de reuniões de órgãos e equipas.",
+  "fields": [
+    {"key": "body", "label": "Órgão", "type": "text", "filterable": true},
+    {"key": "attendees", "label": "Presentes", "type": "people"}
+  ],
+  "sections": [
+    {"key": "agenda", "label": "Ordem de trabalhos", "patterns": ["ordem de trabalhos", "agenda"]},
+    {"key": "decisions", "label": "Deliberações", "patterns": ["delibera[çc][õo]es", "decis[õo]es"]}
+  ]
+}
+```
+
+- **Núcleo comum a todos os tipos:** título, autores, ano, palavras-chave e resumo. Os campos próprios de cada tipo ficam em `fields`.
+- **Tipos de campo:** `text`, `list` e `people` (lista de nomes, a que se tiram títulos como Prof. ou Dr.).
+- **`filterable`:** o campo vai para os metadados de cada excerto e pode filtrar pesquisas. Só se aplica a campos `text`.
+- **Padrões de secção:** são regex Python, sem distinção entre maiúsculas e minúsculas, comparadas com a linha inteira depois de tirar a numeração ("2.", "5.1", "Capítulo 3").
+- **Secções com papel especial:** a secção `abstract` dá o resumo e `references` dá a bibliografia.
+- **Comum a qualquer tipo:** os elementos iniciais (índice, listas, agradecimentos) e os capítulos numerados sem nome conhecido ("3 Arquitetura do sistema" fica `chapter`).
+- **Entradas de índice:** as linhas com reticências, ou do tipo "Título 12" depois de um título "Índice", não contam como títulos.
+- **Contador de página:** o "16/80 2 COVID – 19" que o pypdf cola à primeira linha é ignorado.
+- **Documentos sem estrutura:** com menos de 2 títulos, o documento fica sem secções.
+- **Quebras de linha:** a extração passou a preservá-las, porque os títulos só se reconhecem linha a linha.
+
+**Proposta da ficha** (`backend/services/metadata_extraction.py`):
+- O modelo pequeno (`GUARD_MODEL`, o mesmo da guarda) escolhe o tipo e propõe título, autores, ano e os campos desse tipo, numa só chamada a partir das 3 primeiras páginas. Este modelo aceita `tool_choice` forçado, que alguns modelos de chat recusam.
+- Resumo, palavras-chave e referências saem do texto por regras, com as secções do tipo escolhido.
+- Se o modelo falhar, fica o tipo por defeito e só a parte das regras.
+- `KNOWLEDGE_BASE_DESCRIPTION` é uma frase sobre a base de conhecimento ("Repositório de trabalhos finais de curso da Escola X", "Normas internas da Câmara Y"). É usada nos prompts da ficha, da guarda e do agente.
 
 **Na aprovação**:
-- Cada chunk leva `section` e, quando preenchidos, `title`, `year` e `course`.
+- Cada chunk leva `section`, `document_type` e, quando preenchidos, `title`, `year` e os campos `filterable` do tipo.
 - As referências são gravadas a partir do texto revisto.
 
 | Endpoint | Descrição |
 |---|---|
+| `GET /documents/types` | Tipos configurados (o primeiro é o tipo por defeito) |
 | `GET /documents/{id}/extraction` | Inclui `metadata`, `sections` (títulos detetados) e `references` |
-| `PUT /documents/{id}/metadata` | Grava a ficha |
+| `PUT /documents/{id}/metadata` | Grava a ficha; ao mudar de tipo, os campos que o novo tipo não tem desaparecem |
 | `POST /documents/{id}/metadata/suggest` | Pede nova proposta ao modelo; só preenche campos vazios |
 
-Variável: `METADATA_EXTRACTION_ENABLED` (por defeito `true`).
+Variáveis: `METADATA_EXTRACTION_ENABLED`, `DOCUMENT_TYPES_FILE` e `KNOWLEDGE_BASE_DESCRIPTION`.
 
 Documentos indexados antes desta aula não têm ficha nem secções. Para os ter, é preciso extrair de novo (reindex).

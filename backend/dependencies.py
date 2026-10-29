@@ -5,6 +5,7 @@ from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_settings
 from backend.services.document_registry import DocumentRegistry
 from backend.services.export_store import ExportStore
+from backend.services.document_types import DocumentTypes, load_document_types
 from backend.services.extraction_review import ExtractionStore
 from backend.services.keyword_index import KeywordIndex
 from backend.services.lmstudio_client import LMStudioClient
@@ -15,6 +16,11 @@ from backend.services.vector_store import VectorStore
 @lru_cache(maxsize=1)
 def get_registry() -> DocumentRegistry:
     return DocumentRegistry()
+
+
+@lru_cache(maxsize=1)
+def get_document_types() -> DocumentTypes:
+    return load_document_types(get_settings().document_types_file)
 
 
 @lru_cache(maxsize=1)
@@ -95,4 +101,4 @@ def get_utility_llm() -> LMStudioClient:
 
 @lru_cache(maxsize=1)
 def get_scope_guard() -> ScopeGuard:
-    return ScopeGuard(get_utility_llm())
+    return ScopeGuard(get_utility_llm(), get_settings().knowledge_base_description)

@@ -3,56 +3,45 @@ import logging
 import re
 
 from backend.agent.runner import ChatCompletionClient
-from backend.models import DocumentMetadata
-from backend.services.document_structure import Heading, Segment, find_abstract, find_keywords, find_references
+from backend.models import DocumentMetadata, FieldValue
+from backend.services.document_structure import find_abstract, find_keywords, find_references, split_sections
+from backend.services.document_types import DocumentType, DocumentTypes
 
 logger = logging.getLogger(__name__)
 
-# "Prof. Doutor", "Profª Drª", "Eng." antes do nome de um orientador.
+# "Prof. Doutor", "Profª Drª", "Eng." antes de um nome (campos do tipo "people").
 _TITLES = re.compile(r"^(?:(?:prof(?:essor|essora|ª|a)?|dr(?:ª|a)?|doutor(?:a)?|eng(?:º|ª|enheiro|enheira)?|mestre|msc|phd)\.?\s+)+", re.IGNORECASE)
 
 FRONT_PAGES = 3
 FRONT_CHARS = 6000
 
 METADATA_PROMPT = """
-Recebes o início de um documento (capa, folha de rosto e resumo), normalmente um trabalho final de curso,
-dissertação ou relatório académico. Regista os metadados com a ferramenta record_metadata.
+Recebes o início de um documento (capa, primeiras páginas e resumo) de uma base de conhecimento.
+Sobre esta base de conhecimento: {knowledge_base}
+
+Regista a ficha do documento com a ferramenta record_metadata.
+
+Tipos de documento:
+{types}
 
 Regras:
+- Escolhe o tipo que melhor descreve o documento; na dúvida, usa "{default}".
 - Usa apenas o que está escrito no texto. Se um campo não aparece, deixa-o vazio (ou null no ano).
 - Não traduzas nem reformules: copia o título e os nomes como estão, corrigindo só maiúsculas a mais.
-- authors: quem escreveu o trabalho. advisors: orientadores e coorientadores, sem o título (Prof., Dr.).
-- course: o curso ou grau (ex.: "Licenciatura em Engenharia Informática").
-- year: o ano de entrega ou de defesa.
-- Se o documento não for um trabalho académico (contrato, fatura...), preenche só o título.
+- authors: quem escreveu ou é responsável pelo documento (pessoas ou entidades).
+- year: o ano do documento (entrega, publicação, aprovação ou assinatura).
+- Os campos marcados com "(só <tipo>)" só se preenchem para esse tipo.
 """.strip()
 
-RECORD_METADATA_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "record_metadata",
-        "description": "Regista os metadados encontrados no documento.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "authors": {"type": "array", "items": {"type": "string"}},
-                "advisors": {"type": "array", "items": {"type": "string"}},
-                "year": {"type": ["integer", "null"]},
-                "course": {"type": "string"},
-                "institution": {"type": "string"},
-                "keywords": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["title", "authors", "advisors", "year", "course", "institution", "keywords"],
-        },
-    },
-}
+
+def _clean(value: str) -> str:
+    return " ".join(str(value).split())
 
 
 def _clean_list(values) -> list[str]:
     if not isinstance(values, list):
         return []
-    return [" ".join(str(v).split()) for v in values if str(v).strip()][:20]
+    return [_clean(v) for v in values if str(v).strip()][:20]
 
 
 def _clean_year(value) -> int | None:
@@ -63,10 +52,59 @@ def _clean_year(value) -> int | None:
     return year if 1900 <= year <= 2100 else None
 
 
-def _ask_llm(llm: ChatCompletionClient, front_text: str) -> dict:
+def clean_fields(doc_type: DocumentType, raw: dict) -> dict[str, FieldValue]:
+    """Mantém só os campos do tipo, com o formato certo; descarta os vazios."""
+    fields: dict[str, FieldValue] = {}
+    for field in doc_type.fields:
+        value = raw.get(field.key)
+        if field.kind == "text":
+            cleaned = _clean(value) if isinstance(value, str) else ""
+        else:
+            cleaned = _clean_list(value if isinstance(value, list) else [value] if value else [])
+            if field.kind == "people":
+                cleaned = [_TITLES.sub("", name) for name in cleaned]
+        if cleaned:
+            fields[field.key] = cleaned
+    return fields
+
+
+def _record_tool(types: DocumentTypes) -> dict:
+    properties: dict = {
+        "title": {"type": "string"},
+        "authors": {"type": "array", "items": {"type": "string"}},
+        "year": {"type": ["integer", "null"]},
+        "keywords": {"type": "array", "items": {"type": "string"}},
+    }
+    if len(types.types) > 1:
+        properties["document_type"] = {"type": "string", "enum": list(types.types)}
+    # Campos próprios de todos os tipos numa só chamada; a descrição diz a que tipo pertencem.
+    for doc_type in types.types.values():
+        for field in doc_type.fields:
+            schema = {"type": "string"} if field.kind == "text" else {"type": "array", "items": {"type": "string"}}
+            owners = properties.get(field.key, {}).get("description", "")
+            label = f"{field.label}{f': {field.hint}' if field.hint else ''}"
+            own = f"(só {doc_type.key}) {label}"
+            schema["description"] = f"{owners} | {own}" if owners else own
+            properties[field.key] = schema
+    return {
+        "type": "function",
+        "function": {
+            "name": "record_metadata",
+            "description": "Regista a ficha encontrada no documento.",
+            "parameters": {"type": "object", "properties": properties, "required": ["title", "authors", "year", "keywords"]},
+        },
+    }
+
+
+def _ask_llm(llm: ChatCompletionClient, types: DocumentTypes, knowledge_base: str, front_text: str) -> dict:
+    system = METADATA_PROMPT.format(
+        knowledge_base=knowledge_base,
+        types="\n".join(f"- {t.key}: {t.label}. {t.description}" for t in types.types.values()),
+        default=types.default,
+    )
     message = llm.complete(
-        [{"role": "system", "content": METADATA_PROMPT}, {"role": "user", "content": front_text}],
-        tools=[RECORD_METADATA_TOOL],
+        [{"role": "system", "content": system}, {"role": "user", "content": front_text}],
+        tools=[_record_tool(types)],
         tool_choice={"type": "function", "function": {"name": "record_metadata"}},
         temperature=0.0,
     )
@@ -80,38 +118,51 @@ def _front_text(pages: list[tuple[int, str]], abstract: str) -> str:
     return text
 
 
-def propose_metadata(
-    pages: list[tuple[int, str]],
-    segments: list[Segment],
-    headings: list[Heading],
-    llm: ChatCompletionClient | None,
-) -> DocumentMetadata:
-    """Resumo, palavras-chave e referências saem do texto por regras (exatos); título, autores, ano, curso...
-    vêm do LLM. Se o LLM falhar, devolve só a parte das regras e auto_filled=False."""
+def rule_based_metadata(pages: list[tuple[int, str]], doc_type: DocumentType) -> DocumentMetadata:
+    """Resumo, palavras-chave e referências, só com regras e as secções do tipo."""
+    segments, headings = split_sections(pages, doc_type.sections)
     abstract = find_abstract(segments, headings)
     front = "\n".join(text for _, text in pages[:FRONT_PAGES])
     abstract_text = "\n".join(s.text for s in segments if s.section == "abstract")
-    keywords = find_keywords(f"{front}\n{abstract_text}")
-    metadata = DocumentMetadata(abstract=abstract, keywords=keywords, references=find_references(segments))
+    return DocumentMetadata(
+        document_type=doc_type.key,
+        abstract=abstract,
+        keywords=find_keywords(f"{front}\n{abstract_text}"),
+        references=find_references(segments),
+    )
+
+
+def propose_metadata(
+    pages: list[tuple[int, str]],
+    types: DocumentTypes,
+    llm: ChatCompletionClient | None,
+    knowledge_base: str = "",
+) -> DocumentMetadata:
+    """O LLM escolhe o tipo e propõe título, autores, ano e os campos do tipo; resumo, palavras-chave e
+    referências saem do texto por regras. Se o LLM falhar, fica o tipo por defeito, só com as regras."""
+    # Antes de saber o tipo, o resumo procura-se com as secções de todos os tipos.
+    union = DocumentType("_all", "", "", sections=types.union_sections)
+    provisional = rule_based_metadata(pages, union)
+    fallback = rule_based_metadata(pages, types.get(None))
     if llm is None or not any(text.strip() for _, text in pages):
-        return metadata
+        return fallback
 
     try:
-        proposed = _ask_llm(llm, _front_text(pages, abstract))
+        proposed = _ask_llm(llm, types, knowledge_base, _front_text(pages, provisional.abstract))
     except Exception:
-        logger.warning("Extração de metadados com o LLM falhou; ficha fica por preencher", exc_info=True)
-        return metadata
+        logger.warning("Extração da ficha com o LLM falhou; fica por preencher", exc_info=True)
+        return fallback
 
-    return metadata.model_copy(
+    doc_type = types.get(proposed.get("document_type"))
+    by_rules = rule_based_metadata(pages, doc_type)
+    return by_rules.model_copy(
         update={
-            "title": " ".join(str(proposed.get("title") or "").split()),
+            "title": _clean(proposed.get("title") or ""),
             "authors": _clean_list(proposed.get("authors")),
-            "advisors": [_TITLES.sub("", advisor) for advisor in _clean_list(proposed.get("advisors"))],
             "year": _clean_year(proposed.get("year")),
-            "course": " ".join(str(proposed.get("course") or "").split()),
-            "institution": " ".join(str(proposed.get("institution") or "").split()),
             # As palavras-chave escritas no documento valem mais do que as que o LLM deduz.
-            "keywords": keywords or _clean_list(proposed.get("keywords"))[:15],
+            "keywords": by_rules.keywords or _clean_list(proposed.get("keywords"))[:15],
+            "fields": clean_fields(doc_type, proposed),
             "auto_filled": True,
         }
     )
