@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Pencil, RotateCcw, X } from "lucide-react";
 import {
   approveDocument,
   getDocumentTypes,
   getExtraction,
+  renameDocument,
   rerunPageOcr,
   suggestMetadata,
   updateMetadata,
@@ -126,6 +127,79 @@ function ReviewPage({ page, readOnly, busy, onSave, onToggleExcluded, onRerunOcr
   );
 }
 
+// Nome no sistema: o que aparece na lista e nas citações. É gerado no upload e não acompanha correções da
+// ficha; se a ficha mudar, a sugestão nova aparece aqui para ser aplicada à mão.
+function NameRow({ doc, suggestedName, busy, onRename }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const showSuggestion = suggestedName && suggestedName !== doc.filename;
+
+  if (editing) {
+    return (
+      <form
+        className="mt-1.5 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setEditing(false);
+          if (value.trim() && value.trim() !== doc.filename) onRename(value.trim());
+        }}
+      >
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
+          aria-label="Nome no sistema"
+          className="min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-2 py-1 font-mono text-xs outline-none focus:border-stone-500 dark:border-stone-600 dark:bg-stone-900"
+        />
+        <button type="submit" className="rounded-md bg-stone-900 px-2.5 py-1 text-xs font-medium text-white dark:bg-stone-100 dark:text-stone-900">
+          Guardar
+        </button>
+        <button type="button" onClick={() => setEditing(false)} className="px-1 text-xs text-stone-500 dark:text-stone-400">
+          Cancelar
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+      <span className="flex min-w-0 items-center gap-1.5">
+        Nome no sistema:
+        <span className="truncate font-mono text-stone-700 dark:text-stone-300" title={doc.original_filename ? `Original: ${doc.original_filename}` : undefined}>
+          {doc.filename}
+        </span>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setValue(doc.filename.replace(/\.pdf$/i, ""));
+            setEditing(true);
+          }}
+          aria-label="Renomear"
+          title="Renomear"
+          className="rounded p-0.5 hover:bg-stone-200 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+        >
+          <Pencil className="size-3" />
+        </button>
+      </span>
+      {showSuggestion && (
+        <span className="flex min-w-0 items-center gap-1.5">
+          Sugestão: <span className="truncate font-mono">{suggestedName}</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onRename(null)}
+            className="font-medium text-accent-600 hover:underline dark:text-accent-400"
+          >
+            Usar
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function ReviewPanel({ documentId, onClose, onApproved }) {
   const [extraction, setExtraction] = useState(null);
   const [error, setError] = useState("");
@@ -224,7 +298,6 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
             </h2>
             {doc && (
               <p className="mt-0.5 text-sm text-stone-500 dark:text-stone-400">
-                {doc.title && <span className="font-mono text-xs">{doc.filename} · </span>}
                 {doc.page_count} página{doc.page_count !== 1 && "s"}
                 {pagesWithAlerts > 0 ? (
                   <span className="text-amber-700 dark:text-amber-400"> · {pagesWithAlerts} com alertas</span>
@@ -232,6 +305,19 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
                   " · sem alertas"
                 )}
               </p>
+            )}
+            {doc && (
+              <NameRow
+                doc={doc}
+                suggestedName={extraction.suggested_name}
+                busy={busy}
+                onRename={(name) =>
+                  run("A renomear…", async () => {
+                    await renameDocument(documentId, name);
+                    return getExtraction(documentId);
+                  })
+                }
+              />
             )}
           </div>
           <button

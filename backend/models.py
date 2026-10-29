@@ -4,11 +4,18 @@ from pydantic import BaseModel, Field
 
 
 DocumentStatus = Literal["pending_review", "indexed"]
+# original: nome do ficheiro carregado; suggested: gerado da ficha no upload; manual: escolhido à mão.
+NameSource = Literal["original", "suggested", "manual"]
 
 
 class DocumentInfo(BaseModel):
     document_id: str
+    # Nome no sistema: o que aparece na lista, nas fontes e nas citações (ver document_naming.py).
     filename: str
+    original_filename: str = ""
+    # Nome do PDF em disco, dentro de UPLOAD_DIR. Vazio nos documentos antigos, guardados com o nome original.
+    storage_name: str = ""
+    name_source: NameSource = "original"
     sha256: str
     created_at: str
     chunk_count: int
@@ -100,6 +107,12 @@ class DocumentExtraction(BaseModel):
     metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
     sections: list[SectionHeading] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
+    suggested_name: str = ""
+
+
+class RenameRequest(BaseModel):
+    # None (ou vazio) volta ao nome sugerido pela ficha.
+    name: str | None = None
 
 
 class PageUpdateRequest(BaseModel):

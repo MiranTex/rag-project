@@ -475,3 +475,22 @@ Tools do agente para descobrir e comparar documentos, e não só para encontrar 
 - O vetor é criado na aprovação e apagado quando o documento volta à revisão ou é removido.
 - Documentos indexados antes deste índice recebem o vetor automaticamente na primeira utilização.
 
+## Aula 16: Nome dos documentos
+
+O nome no sistema é o que aparece na lista, nas fontes e nas citações do agente.
+
+- **No upload:** é gerado a partir da ficha proposta, com o `name_pattern` do tipo (em `document_types.json`).
+  - Exemplos: `2024 - Título - Autor.pdf` num trabalho académico, `PR-07 - Gestão de Acessos (v3).pdf` num procedimento.
+  - Se a ficha não tiver título, fica o nome original.
+  - Nomes repetidos ganham " (2)".
+- **Depois do upload, o nome não muda sozinho:** nem quando se corrige a ficha, nem ao extrair de novo. Se a ficha mudar, o ecrã de revisão mostra a sugestão nova, para a aplicar se se quiser.
+- **O agente não muda nomes:** não há nenhuma tool para isso.
+- **Em disco, o PDF fica como `<id>.pdf`:** dois uploads com o mesmo nome deixam de se sobrepor. Os documentos antigos continuam com o nome original em disco (`storage_name`); o nome original fica sempre em `original_filename`.
+- **Na barra lateral,** "Procurar documento" filtra pelo nome, pelo título e pelo nome original, sem distinguir acentos.
+
+| Padrão | Campos disponíveis |
+|---|---|
+| `"{year} - {title}"` | `title`, `year`, `authors` (primeiro autor), `type`, `date` (data do upload) e os campos do tipo |
+| `"{code} - {title}[ (v{version})]"` | Partes sem valor desaparecem; `[...]` é um grupo opcional |
+
+Variável: `AUTO_RENAME_DOCUMENTS` (por defeito `true`).

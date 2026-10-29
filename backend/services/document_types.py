@@ -12,6 +12,10 @@ from typing import Literal
 
 FieldKind = Literal["text", "list", "people"]
 
+# Nome do documento no sistema (ver document_naming.py).
+DEFAULT_NAME_PATTERN = "{year} - {title}"
+NAME_PLACEHOLDERS = {"title", "year", "authors", "type", "date"}
+
 
 @dataclass(frozen=True)
 class FieldDef:
@@ -36,6 +40,7 @@ class DocumentType:
     description: str
     fields: tuple[FieldDef, ...] = ()
     sections: tuple[SectionDef, ...] = ()
+    name_pattern: str = ""
 
     def field(self, key: str) -> FieldDef | None:
         return next((f for f in self.fields if f.key == key), None)
@@ -46,6 +51,10 @@ class DocumentTypes:
     types: dict[str, DocumentType]
     default: str
     union_sections: tuple[SectionDef, ...] = field(default=())
+    name_pattern: str = DEFAULT_NAME_PATTERN
+
+    def name_pattern_for(self, doc_type: DocumentType) -> str:
+        return doc_type.name_pattern or self.name_pattern
 
     def get(self, key: str | None) -> DocumentType:
         return self.types.get(key or "", self.types[self.default])
@@ -69,6 +78,12 @@ def _section(raw: dict) -> SectionDef:
     )
 
 
+def _check_name_pattern(owner: str, pattern: str, field_keys: set[str]) -> None:
+    unknown = set(re.findall(r"\{(\w+)\}", pattern)) - NAME_PLACEHOLDERS - field_keys
+    if unknown:
+        raise ValueError(f"name_pattern de {owner!r} usa campos desconhecidos: {sorted(unknown)}")
+
+
 def parse_document_types(config: dict) -> DocumentTypes:
     types: dict[str, DocumentType] = {}
     for key, raw in config["types"].items():
@@ -84,7 +99,11 @@ def parse_document_types(config: dict) -> DocumentTypes:
         sections = [_section(s) for s in raw.get("sections", [])]
         if any(s.key in BUILTIN_LABELS for s in sections):
             raise ValueError(f"tipo {key!r}: {sorted(BUILTIN_LABELS)} são chaves reservadas")
-        types[key] = DocumentType(key, raw.get("label", key), raw.get("description", ""), tuple(fields), tuple(sections))
+        name_pattern = raw.get("name_pattern", "")
+        _check_name_pattern(key, name_pattern, {f.key for f in fields})
+        types[key] = DocumentType(
+            key, raw.get("label", key), raw.get("description", ""), tuple(fields), tuple(sections), name_pattern
+        )
 
     default = config.get("default") or next(iter(types))
     if default not in types:
@@ -98,7 +117,9 @@ def parse_document_types(config: dict) -> DocumentTypes:
             if union[s.key] is not s:
                 merged = f"{union[s.key].pattern.pattern}|{s.pattern.pattern}"
                 union[s.key] = SectionDef(s.key, union[s.key].label, re.compile(merged, re.IGNORECASE))
-    return DocumentTypes(types=types, default=default, union_sections=tuple(union.values()))
+    name_pattern = config.get("name_pattern") or DEFAULT_NAME_PATTERN
+    _check_name_pattern("(geral)", name_pattern, set())
+    return DocumentTypes(types=types, default=default, union_sections=tuple(union.values()), name_pattern=name_pattern)
 
 
 def load_document_types(path: str) -> DocumentTypes:

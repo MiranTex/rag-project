@@ -8,6 +8,7 @@ import {
   getDocuments,
   getHealth,
   reindexDocument,
+  renameDocument,
   uploadDocument,
 } from "./api";
 import ChatPanel from "./components/ChatPanel";
@@ -356,6 +357,16 @@ export default function App() {
     }
   }
 
+  async function handleRename(documentId, name) {
+    try {
+      const doc = await renameDocument(documentId, name);
+      notify(`Renomeado para ${doc.filename}`);
+      await refreshData();
+    } catch (err) {
+      notify(`Não foi possível renomear: ${err.message}`, "error");
+    }
+  }
+
   async function handleDelete(documentId) {
     try {
       const result = await deleteDocument(documentId);
@@ -414,6 +425,7 @@ export default function App() {
           setSidebarOpen(false);
           setReviewingDocument(id);
         }}
+        onRename={handleRename}
         onReindex={handleReindex}
         onDelete={handleDelete}
         onNewChat={() => {

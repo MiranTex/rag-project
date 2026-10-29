@@ -35,6 +35,14 @@ class VectorStore:
     def list_ids(self) -> set[str]:
         return set(self.collection.get(include=[])["ids"])
 
+    def update_document_metadata(self, document_id: str, updates: dict) -> int:
+        """Altera campos dos metadados de todas as entradas de um documento (ex.: o nome); devolve quantas."""
+        result = self.collection.get(where={"document_id": document_id}, include=["metadatas"])
+        if not result["ids"]:
+            return 0
+        self.collection.update(ids=result["ids"], metadatas=[{**meta, **updates} for meta in result["metadatas"]])
+        return len(result["ids"])
+
     def delete_document(self, document_id: str) -> None:
         self.collection.delete(where={"document_id": document_id})
 

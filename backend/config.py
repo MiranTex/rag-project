@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     review_max_garbled_ratio: float = 0.15
     # Ficha do documento (tipo, título, autores, ano...) proposta pelo LLM na extração.
     metadata_extraction_enabled: bool = True
+    # Nome no sistema gerado da ficha no upload (padrão name_pattern em document_types.json).
+    auto_rename_documents: bool = True
     # Tipos de documento desta base de conhecimento (campos da ficha e títulos de secção).
     document_types_file: str = "backend/document_types.json"
     # Uma frase sobre esta base de conhecimento, usada nos prompts (guarda, agente, extração da ficha).

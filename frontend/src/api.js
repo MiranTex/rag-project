@@ -132,6 +132,18 @@ export async function suggestMetadata(documentId) {
   return data;
 }
 
+// name vazio/null volta ao nome sugerido pela ficha.
+export async function renameDocument(documentId, name) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/name`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name || null }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao renomear");
+  return data;
+}
+
 export async function approveDocument(documentId) {
   const res = await fetch(`${API_BASE}/documents/${documentId}/approve`, {
     method: "POST",

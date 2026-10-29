@@ -10,6 +10,8 @@ import backend.api.documents as documents_api
 from backend.config import Settings
 from backend.models import ReviewPage
 from backend.services.document_registry import DocumentRegistry
+from backend.services.document_renamer import DocumentRenamer
+from backend.services.pdf_ingestion import ExtractedPage
 from backend.services.extraction_review import ExtractionStore, garbled_ratio, validate_page
 
 
@@ -67,6 +69,14 @@ class _FakeVectorStore:
         for chunk_id, text, metadata in zip(ids, documents, metadatas):
             self.chunks[chunk_id] = {"text": text, "metadata": metadata}
 
+    def list_chunks(self, document_id=None):
+        return [c for c in self.chunks.values() if c["metadata"]["document_id"] == document_id]
+
+    def update_document_metadata(self, document_id, updates):
+        for chunk in self.list_chunks(document_id):
+            chunk["metadata"] = {**chunk["metadata"], **updates}
+        return len(self.list_chunks(document_id))
+
 
 class _FakeKeywordIndex:
     def __init__(self):
@@ -121,6 +131,10 @@ def env(tmp_path, monkeypatch):
     # Índice de documentos falso: os testes não tocam no Chroma nem no modelo de embeddings.
     state["profiles"] = []
     monkeypatch.setattr(documents_api, "get_profile_store", lambda: state["vectors"])
+    renamer = DocumentRenamer(
+        state["registry"], state["vectors"], state["keywords"], state["vectors"], documents_api.get_document_types()
+    )
+    monkeypatch.setattr(documents_api, "get_renamer", lambda: renamer)
     monkeypatch.setattr(
         documents_api,
         "upsert_profile",
@@ -272,3 +286,68 @@ def test_document_types_endpoint_lists_default_first(env):
     assert {"key": "course", "label": "Curso", "type": "text", "filterable": True}.items() <= next(
         f for f in academic["fields"] if f["key"] == "course"
     ).items()
+
+
+def test_documents_are_stored_by_id_and_named_at_upload(env, monkeypatch):
+    client = env["client"]
+    uploads = env["tmp_path"] / "uploads"
+    monkeypatch.setattr(documents_api, "extract_pages", lambda path, **kwargs: [ExtractedPage(1, THESIS_TEXT, "text")])
+    doc = _upload(env, ["Contrato"])
+    doc_id = doc["document_id"]
+
+    # Em disco pelo id; no sistema, o nome vem da ficha proposta no upload.
+    assert (uploads / f"{doc_id}.pdf").exists()
+    assert (doc["filename"], doc["original_filename"], doc["name_source"]) == (
+        "2024 - Recomendação de Livros - Ana Martins.pdf",
+        "scan.pdf",
+        "suggested",
+    )
+
+    # Corrigir a ficha depois do upload não muda o nome (a sugestão fica disponível na revisão).
+    extraction = client.get(f"/documents/{doc_id}/extraction").json()
+    metadata = {**extraction["metadata"], "title": "Livros nas Bibliotecas"}
+    extraction = client.put(f"/documents/{doc_id}/metadata", json=metadata).json()
+    assert extraction["document"]["filename"] == "2024 - Recomendação de Livros - Ana Martins.pdf"
+    assert extraction["suggested_name"] == "2024 - Livros nas Bibliotecas - Ana Martins.pdf"
+
+    # À mão continua a ser possível.
+    doc = client.put(f"/documents/{doc_id}/name", json={"name": "Livros: estudo/2024"}).json()
+    assert (doc["filename"], doc["name_source"]) == ("Livros estudo 2024.pdf", "manual")
+
+    client.post(f"/documents/{doc_id}/approve")
+    assert {c["metadata"]["filename"] for c in env["vectors"].chunks.values()} == {"Livros estudo 2024.pdf"}
+
+    # Num documento indexado, usar a sugestão muda o nome também nos excertos e no índice de palavras-chave.
+    doc = client.put(f"/documents/{doc_id}/name", json={"name": None}).json()
+    assert (doc["filename"], doc["name_source"]) == ("2024 - Livros nas Bibliotecas - Ana Martins.pdf", "suggested")
+    assert {c["metadata"]["filename"] for c in env["vectors"].chunks.values()} == {doc["filename"]}
+    assert {c["metadata"]["filename"] for c in env["keywords"].documents[doc_id]} == {doc["filename"]}
+
+    # Extrair de novo mantém o nome.
+    doc = client.post(f"/documents/{doc_id}/reindex").json()["document"]
+    assert doc["filename"] == "2024 - Livros nas Bibliotecas - Ana Martins.pdf"
+
+    client.delete(f"/documents/{doc_id}")
+    assert not (uploads / f"{doc_id}.pdf").exists()
+
+
+def test_documents_with_the_same_name_keep_separate_files_and_names(env):
+    first = _upload(env, ["Primeiro documento"])
+    pdf_path = env["tmp_path"] / "scan.pdf"
+    _image_only_pdf(pdf_path, ["Segundo documento diferente"])
+    with pdf_path.open("rb") as f:
+        second = env["client"].post("/documents/upload", files={"file": ("scan.pdf", f, "application/pdf")}).json()["document"]
+
+    assert first["document_id"] != second["document_id"]
+    uploads = env["tmp_path"] / "uploads"
+    assert (uploads / f"{first['document_id']}.pdf").exists() and (uploads / f"{second['document_id']}.pdf").exists()
+    # Dois "scan.pdf": o segundo nome no sistema é diferente.
+    assert (first["filename"], second["filename"]) == ("scan.pdf", "scan (2).pdf")
+
+
+def test_rename_rejects_invalid_names(env):
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    assert env["client"].put(f"/documents/{doc_id}/name", json={"name": " / "}).status_code == 422
+    # Sem título na ficha não há nome sugerido.
+    assert env["client"].put(f"/documents/{doc_id}/name", json={"name": None}).status_code == 422
+    assert env["client"].put("/documents/nao-existe/name", json={"name": "x"}).status_code == 404

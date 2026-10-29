@@ -6,6 +6,7 @@ from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_settings
 from backend.services.document_profiles import upsert_profile
 from backend.services.document_registry import DocumentRegistry
+from backend.services.document_renamer import DocumentRenamer
 from backend.services.export_store import ExportStore
 from backend.services.document_types import DocumentTypes, load_document_types
 from backend.services.extraction_review import ExtractionStore
@@ -73,6 +74,18 @@ def get_profile_store() -> VectorStore:
     except Exception:
         logger.warning("Não foi possível completar o índice de documentos", exc_info=True)
     return store
+
+
+@lru_cache(maxsize=1)
+def get_renamer() -> DocumentRenamer:
+    return DocumentRenamer(
+        registry=get_registry(),
+        vector_store=get_vector_store(),
+        keyword_index=get_keyword_index(),
+        profile_store=get_profile_store(),
+        document_types=get_document_types(),
+        auto_rename=get_settings().auto_rename_documents,
+    )
 
 
 @lru_cache(maxsize=1)

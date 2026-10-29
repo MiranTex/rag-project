@@ -16,8 +16,9 @@ from backend.dependencies import (
     get_extraction_store,
     get_keyword_index,
     get_profile_store,
-    get_utility_llm,
     get_registry,
+    get_renamer,
+    get_utility_llm,
     get_vector_store,
 )
 from backend.models import (
@@ -30,12 +31,15 @@ from backend.models import (
     PageAlert,
     PageOcrRequest,
     PageUpdateRequest,
+    RenameRequest,
     ReviewPage,
     SectionHeading,
     UploadResponse,
 )
 from backend.services.document_profiles import upsert_profile
+from backend.services.document_renamer import RenameError
 from backend.services.document_structure import Heading, Segment, find_references, split_sections
+from backend.services.document_naming import clean_name, unique_name
 from backend.services.document_types import DocumentType, section_label
 from backend.services.embeddings import embed_texts
 from backend.services.extraction_review import validate_page
@@ -114,6 +118,27 @@ def _propose_metadata(pages: list[ReviewPage]) -> DocumentMetadata:
     )
 
 
+def _taken_names(document_id: str) -> set[str]:
+    return {d.filename for d in get_registry().list_documents() if d.document_id != document_id}
+
+
+def _stored_path(info: DocumentInfo) -> Path:
+    return Path(get_settings().upload_dir) / (info.storage_name or info.filename)
+
+
+def _drop_legacy_file(previous: DocumentInfo, stored_name: str) -> None:
+    """Documentos antigos estavam em disco com o nome original; depois de copiados para <id>.pdf, o ficheiro
+    antigo só se apaga se nenhum outro documento o usar (dois uploads com o mesmo nome partilhavam-no)."""
+    legacy = previous.storage_name or previous.filename
+    if legacy == stored_name:
+        return
+    in_use = any(
+        (d.storage_name or d.filename) == legacy for d in get_registry().list_documents() if d.document_id != previous.document_id
+    )
+    if not in_use:
+        (Path(get_settings().upload_dir) / legacy).unlink(missing_ok=True)
+
+
 def _build_extraction(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentExtraction:
     metadata = get_extraction_store().load_metadata(info.document_id)
     doc_type = _document_type(metadata)
@@ -127,15 +152,23 @@ def _build_extraction(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentEx
             for h in headings
         ],
         references=find_references(segments),
+        suggested_name=get_renamer().suggestion(info, metadata),
     )
 
 
-def _extract_for_review(document_id: str, filename: str, raw: bytes) -> tuple[DocumentInfo, list[ReviewPage]]:
-    """Fase 1: extrai o texto (pypdf + OCR), valida cada página e deixa o documento à espera de revisão."""
+def _extract_for_review(
+    document_id: str, filename: str, raw: bytes, previous: DocumentInfo | None = None
+) -> tuple[DocumentInfo, list[ReviewPage]]:
+    """Fase 1: extrai o texto (pypdf + OCR), valida cada página e deixa o documento à espera de revisão.
+    `previous` é o registo anterior quando o documento é extraído de novo (mantém o nome que tinha)."""
     settings = get_settings()
     started = time.perf_counter()
     logger.info("A extrair %s (%s)", filename, document_id)
-    saved_path = save_uploaded_file(settings.upload_dir, filename, raw)
+    # Em disco pelo id: o nome no sistema pode mudar e dois ficheiros com o mesmo nome não se sobrepõem.
+    stored_name = f"{document_id}.pdf"
+    saved_path = save_uploaded_file(settings.upload_dir, stored_name, raw)
+    if previous:
+        _drop_legacy_file(previous, stored_name)
     extracted = {
         page.page: page
         for page in extract_pages(
@@ -173,10 +206,14 @@ def _extract_for_review(document_id: str, filename: str, raw: bytes) -> tuple[Do
     metadata = _propose_metadata(pages)
     get_extraction_store().save_metadata(document_id, metadata)
 
+    original = previous.original_filename or previous.filename if previous else Path(filename).name
     info = _with_counts(
         DocumentInfo(
             document_id=document_id,
-            filename=Path(filename).name,
+            filename=previous.filename if previous else unique_name(clean_name(original) or original, _taken_names(document_id)),
+            original_filename=original,
+            storage_name=stored_name,
+            name_source=previous.name_source if previous else "original",
             sha256=file_sha256(raw),
             created_at=utc_now_iso(),
             chunk_count=0,
@@ -187,11 +224,15 @@ def _extract_for_review(document_id: str, filename: str, raw: bytes) -> tuple[Do
         ),
         pages,
     )
+    # O nome automático só se decide no upload; ao extrair de novo mantém-se o nome que o documento já tinha.
+    if previous is None:
+        info = get_renamer().name_at_upload(info, metadata)
     get_registry().add_or_replace(info)
     logger.info(
-        "%s extraído em %.1fs: %d página(s), %d alerta(s), ficha %s",
+        "%s extraído em %.1fs como %s: %d página(s), %d alerta(s), ficha %s",
         filename,
         time.perf_counter() - started,
+        info.filename,
         info.page_count,
         info.alert_count,
         "proposta" if metadata.auto_filled else "por preencher",
@@ -291,9 +332,11 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
     return indexed
 
 
-def _extract_and_maybe_approve(document_id: str, filename: str, raw: bytes) -> UploadResponse:
+def _extract_and_maybe_approve(
+    document_id: str, filename: str, raw: bytes, previous: DocumentInfo | None = None
+) -> UploadResponse:
     with _locked(document_id):
-        info, pages = _extract_for_review(document_id, filename, raw)
+        info, pages = _extract_for_review(document_id, filename, raw, previous)
         if get_settings().auto_approve_clean_documents and info.alert_count == 0:
             return UploadResponse(
                 message="Documento sem alertas: aprovado e indexado automaticamente.",
@@ -365,7 +408,7 @@ def delete_document(document_id: str) -> dict:
     registry.remove(document_id)
     get_extraction_store().delete(document_id)
 
-    upload_path = Path(settings.upload_dir) / existing.filename
+    upload_path = _stored_path(existing)
     if upload_path.exists():
         upload_path.unlink()
 
@@ -381,7 +424,7 @@ async def reindex_document(document_id: str) -> UploadResponse:
     if not existing:
         raise HTTPException(status_code=404, detail="Documento não encontrado.")
 
-    upload_path = Path(settings.upload_dir) / existing.filename
+    upload_path = _stored_path(existing)
     if not upload_path.exists():
         raise HTTPException(
             status_code=404,
@@ -390,7 +433,7 @@ async def reindex_document(document_id: str) -> UploadResponse:
 
     raw = upload_path.read_bytes()
     # Volta a extrair do zero: as edições manuais anteriores perdem-se.
-    return await run_in_threadpool(_extract_and_maybe_approve, document_id, existing.filename, raw)
+    return await run_in_threadpool(_extract_and_maybe_approve, document_id, existing.filename, raw, existing)
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -418,7 +461,7 @@ async def upload_document(
 
     document_id = existing.document_id if existing else str(uuid4())
     # OCR e embeddings são CPU-bound: correr fora do event loop para não bloquear os outros pedidos.
-    return await run_in_threadpool(_extract_and_maybe_approve, document_id, file.filename, raw)
+    return await run_in_threadpool(_extract_and_maybe_approve, document_id, file.filename, raw, existing)
 
 
 @router.get("/{document_id}/extraction", response_model=DocumentExtraction)
@@ -454,7 +497,7 @@ async def rerun_page_ocr(document_id: str, page_number: int, payload: PageOcrReq
             _require_pending(info)
             page = _find_page(pages, page_number)
 
-            upload_path = Path(settings.upload_dir) / info.filename
+            upload_path = _stored_path(info)
             if not upload_path.exists():
                 raise HTTPException(status_code=404, detail="Ficheiro original não encontrado no storage local.")
 
@@ -560,6 +603,19 @@ async def suggest_metadata(document_id: str) -> DocumentExtraction:
             return _build_extraction(info, pages)
 
     return await run_in_threadpool(run)
+
+
+@router.put("/{document_id}/name", response_model=DocumentInfo)
+def rename_document(document_id: str, payload: RenameRequest) -> DocumentInfo:
+    """Muda o nome do documento no sistema; sem nome, volta ao sugerido pela ficha. Funciona também em
+    documentos indexados (o nome muda nas fontes e citações)."""
+    if get_registry().find_by_id(document_id) is None:
+        raise HTTPException(status_code=404, detail="Documento não encontrado.")
+    with _locked(document_id):
+        try:
+            return get_renamer().rename(document_id, payload.name, get_extraction_store().load_metadata(document_id))
+        except RenameError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/{document_id}/approve", response_model=UploadResponse)

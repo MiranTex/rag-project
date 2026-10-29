@@ -3,6 +3,8 @@ import {
   FileText,
   Loader2,
   MoreHorizontal,
+  Pencil,
+  Search,
   RotateCcw,
   ScanText,
   SquarePen,
@@ -73,7 +75,7 @@ function UploadDropzone({ uploading, onUpload }) {
   );
 }
 
-function DocumentMenu({ doc, onReview, onReindex, onDelete, onClose }) {
+function DocumentMenu({ doc, onReview, onRename, onReindex, onDelete, onClose }) {
   const ref = useRef(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useClickOutside(ref, onClose, true);
@@ -88,6 +90,10 @@ function DocumentMenu({ doc, onReview, onReindex, onDelete, onClose }) {
       <button type="button" className={item} onClick={() => onReview(doc.document_id)}>
         <ScanText className="size-4 text-stone-500 dark:text-stone-400" />
         {doc.status === "pending_review" ? "Rever texto" : "Ver texto extraído"}
+      </button>
+      <button type="button" className={item} onClick={() => onRename(doc.document_id)}>
+        <Pencil className="size-4 text-stone-500 dark:text-stone-400" />
+        Renomear
       </button>
       <button type="button" className={item} onClick={() => onReindex(doc.document_id)}>
         <RotateCcw className="size-4 text-stone-500 dark:text-stone-400" />
@@ -113,9 +119,66 @@ function DocumentMenu({ doc, onReview, onReindex, onDelete, onClose }) {
   );
 }
 
-function DocumentItem({ doc, onReview, onReindex, onDelete }) {
+const displayName = (filename) => filename.replace(/\.pdf$/i, "");
+const normalize = (text) =>
+  (text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+function RenameInput({ doc, onRename, onDone }) {
+  const [value, setValue] = useState(displayName(doc.filename));
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.select();
+  }, []);
+
+  async function save() {
+    const name = value.trim();
+    if (!name || name === displayName(doc.filename)) {
+      onDone();
+      return;
+    }
+    setSaving(true);
+    // Se falhar, o aviso vem do App; o campo fecha na mesma.
+    await onRename(doc.document_id, name);
+    onDone();
+  }
+
+  return (
+    <div className="px-2.5 py-1.5">
+      <input
+        ref={inputRef}
+        value={value}
+        disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") onDone();
+        }}
+        onBlur={onDone}
+        aria-label="Nome novo"
+        className="w-full rounded-md border border-stone-300 bg-white px-2 py-1 text-sm outline-none focus:border-stone-500 dark:border-stone-600 dark:bg-stone-900 dark:focus:border-stone-400"
+      />
+      <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">Enter para guardar · Esc para cancelar</p>
+    </div>
+  );
+}
+
+function DocumentItem({ doc, onReview, onRename, onReindex, onDelete }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const pending = doc.status === "pending_review";
+
+  if (renaming) {
+    return (
+      <li>
+        <RenameInput doc={doc} onRename={onRename} onDone={() => setRenaming(false)} />
+      </li>
+    );
+  }
 
   function act(handler) {
     return (id) => {
@@ -135,9 +198,11 @@ function DocumentItem({ doc, onReview, onReindex, onDelete }) {
         <span className="min-w-0">
           <span
             className="block truncate text-sm text-stone-800 dark:text-stone-200"
-            title={doc.title ? `${doc.title}\n${doc.filename}` : doc.filename}
+            title={[doc.filename, doc.title, doc.original_filename && `Original: ${doc.original_filename}`]
+              .filter(Boolean)
+              .join("\n")}
           >
-            {doc.title || doc.filename}
+            {displayName(doc.filename)}
           </span>
           <span className="block text-xs text-stone-500 dark:text-stone-400">
             {pending ? (
@@ -146,7 +211,6 @@ function DocumentItem({ doc, onReview, onReindex, onDelete }) {
               </span>
             ) : (
               <>
-                {doc.year && `${doc.year} · `}
                 {doc.page_count > 0 && `${doc.page_count} pág. · `}
                 {doc.chunk_count} excertos
               </>
@@ -168,6 +232,10 @@ function DocumentItem({ doc, onReview, onReindex, onDelete }) {
         <DocumentMenu
           doc={doc}
           onReview={act(onReview)}
+          onRename={() => {
+            setMenuOpen(false);
+            setRenaming(true);
+          }}
           onReindex={act(onReindex)}
           onDelete={act(onDelete)}
           onClose={() => setMenuOpen(false)}
@@ -224,6 +292,7 @@ export default function Sidebar({
   uploadingName,
   onUpload,
   onReview,
+  onRename,
   onReindex,
   onDelete,
   onNewChat,
@@ -231,9 +300,18 @@ export default function Sidebar({
   theme,
   onThemeChange,
 }) {
-  const pending = documents.filter((d) => d.status === "pending_review");
-  const indexed = documents.filter((d) => d.status !== "pending_review");
-  const itemProps = { onReview, onReindex, onDelete };
+  const [query, setQuery] = useState("");
+  const terms = normalize(query).split(/\s+/).filter(Boolean);
+  // Procura no nome, no título e no nome original, sem acentos; a lista fica por ordem de nome.
+  const visible = documents
+    .filter((d) => {
+      const haystack = normalize([d.filename, d.title, d.original_filename].join(" "));
+      return terms.every((term) => haystack.includes(term));
+    })
+    .sort((a, b) => a.filename.localeCompare(b.filename, "pt", { numeric: true }));
+  const pending = visible.filter((d) => d.status === "pending_review");
+  const indexed = visible.filter((d) => d.status !== "pending_review");
+  const itemProps = { onReview, onRename, onReindex, onDelete };
 
   return (
     <>
@@ -270,6 +348,20 @@ export default function Sidebar({
           <UploadDropzone uploading={!!uploadingName} onUpload={onUpload} />
         </div>
 
+        {documents.length > 1 && (
+          <label className="relative mx-3 mt-3 block">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-stone-400" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Procurar documento"
+              aria-label="Procurar documento"
+              className="w-full rounded-lg border border-stone-200 bg-white py-1.5 pl-8 pr-2.5 text-sm outline-none placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900 dark:placeholder:text-stone-500 dark:focus:border-stone-600"
+            />
+          </label>
+        )}
+
         <nav className="mt-4 flex-1 space-y-5 overflow-y-auto px-2 pb-4">
           {uploadingName && (
             <div className="flex items-center gap-2.5 px-2.5 text-sm text-stone-600 dark:text-stone-400">
@@ -301,7 +393,9 @@ export default function Sidebar({
                 ))}
               </ul>
             ) : (
-              <p className="px-2.5 text-sm text-stone-500 dark:text-stone-400">Nenhum documento indexado.</p>
+              <p className="px-2.5 text-sm text-stone-500 dark:text-stone-400">
+                {terms.length ? "Nenhum documento corresponde à pesquisa." : "Nenhum documento indexado."}
+              </p>
             )}
           </section>
         </nav>
