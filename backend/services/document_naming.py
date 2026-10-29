@@ -86,4 +86,11 @@ def suggest_name(metadata: DocumentMetadata, doc_type: DocumentType, pattern: st
     """Nome sugerido, ou "" se a ficha não tiver título (sem título o nome original diz mais)."""
     if not metadata.title.strip():
         return ""
-    return clean_name(render_name(pattern, _values(metadata, doc_type, info)))
+    values = _values(metadata, doc_type, info)
+    name = render_name(pattern, values)
+    # Se não couber, encolhe o título (pela palavra) em vez de cortar o fim: o autor ou a versão ficam inteiros.
+    excess = len(name) - MAX_NAME_CHARS
+    if excess > 0 and values["title"]:
+        values["title"] = _shorten(values["title"], max(len(values["title"]) - excess - 1, 20))
+        name = render_name(pattern, values)
+    return clean_name(name)

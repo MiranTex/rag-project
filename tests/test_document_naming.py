@@ -40,6 +40,15 @@ def test_suggest_name_shortens_long_titles_on_word_boundary():
     assert len(name) <= 120 + len(".pdf")
 
 
+def test_suggest_name_shortens_the_title_to_keep_the_author_whole():
+    title = "Desenvolvimento de uma aplicação de monitoramento de doenças crónicas em Cabo Verde com integração hospitalar"
+    name = _suggest("academic", title=title, year=2023, authors=["Artur Ariano Miranda Teixeira"])
+
+    assert name.endswith(" - Artur Ariano Miranda Teixeira.pdf")
+    assert name.startswith("2023 - Desenvolvimento de uma aplicação") and "…" in name
+    assert len(name) <= 120 + len(".pdf")
+
+
 def test_clean_name_removes_forbidden_characters():
     assert clean_name('  Ata 3/2024: "Direção"?  ') == "Ata 3 2024 Direção.pdf"
     assert clean_name("relatorio.PDF") == "relatorio.pdf"
