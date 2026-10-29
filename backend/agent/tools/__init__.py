@@ -1,6 +1,12 @@
 from backend.agent.tools.base import Tool, ToolContext, ToolError, ToolRegistry, ToolResult
 from backend.agent.tools.calculations import calculate, date_add, date_difference, percentage_change
-from backend.agent.tools.documents import list_documents, read_document, search_documents
+from backend.agent.tools.documents import (
+    find_similar_documents,
+    get_document_overview,
+    list_documents,
+    read_document,
+    search_documents,
+)
 from backend.agent.tools.exports import export_csv, export_document
 
 # Para acrescentar uma tool: criá-la com @tool num módulo deste pacote e adicioná-la aqui.
@@ -8,6 +14,8 @@ ALL_TOOLS: list[Tool] = [
     list_documents,
     search_documents,
     read_document,
+    get_document_overview,
+    find_similar_documents,
     calculate,
     percentage_change,
     date_difference,

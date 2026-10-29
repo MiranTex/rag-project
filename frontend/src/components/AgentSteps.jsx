@@ -5,6 +5,8 @@ const TOOL_LABELS = {
   list_documents: "Listar documentos",
   search_documents: "Pesquisar",
   read_document: "Ler documento",
+  get_document_overview: "Ficha do documento",
+  find_similar_documents: "Procurar documentos",
   calculate: "Calcular",
   percentage_change: "Variação %",
   date_difference: "Diferença de datas",
@@ -18,6 +20,8 @@ const TOOL_PROGRESS = {
   list_documents: "A ver que documentos existem",
   search_documents: "A pesquisar",
   read_document: "A ler o documento",
+  get_document_overview: "A ver a ficha do documento",
+  find_similar_documents: "A procurar documentos sobre",
   calculate: "A calcular",
   percentage_change: "A calcular a variação",
   date_difference: "A contar o tempo entre datas",
@@ -37,9 +41,22 @@ const GUARD_LABELS = {
   erro_guarda: "verificação indisponível",
 };
 
+function describeFilters(args) {
+  const parts = [];
+  if (args.document_type) parts.push(args.document_type);
+  if (args.year_from || args.year_to) parts.push(`${args.year_from || "…"}–${args.year_to || "…"}`);
+  if (args.sections?.length) parts.push(args.sections.join(", "));
+  for (const value of Object.values(args.fields || {})) parts.push(value);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
 function describeArguments(name, args = {}) {
-  if (name === "search_documents") return `“${args.query}”`;
+  if (name === "search_documents") return `“${args.query}”${describeFilters(args)}`;
+  if (name === "find_similar_documents") {
+    return `${args.query ? `“${args.query}”` : "parecidos com um documento"}${describeFilters(args)}`;
+  }
   if (name === "read_document") {
+    if (args.section) return `secção ${args.section}`;
     if (args.page_start || args.page_end) return `p. ${args.page_start || 1}–${args.page_end || "fim"}`;
     return "documento completo";
   }

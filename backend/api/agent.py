@@ -9,8 +9,11 @@ from backend.agent.tools import ToolContext
 from backend.api.sse import sse_event, stop_on_disconnect
 from backend.config import get_settings
 from backend.dependencies import (
+    get_document_types,
     get_export_store,
+    get_extraction_store,
     get_lmstudio_client,
+    get_profile_store,
     get_rag_pipeline,
     get_registry,
     get_scope_guard,
@@ -64,6 +67,10 @@ def _build_runner(payload: AgentAskRequest, profile: AgentProfile) -> AgentRunne
         export_store=get_export_store(),
         top_k=settings.top_k,
         default_document_id=payload.document_id,
+        extraction_store=get_extraction_store(),
+        document_types=get_document_types(),
+        profile_store=get_profile_store(),
+        embedding_model=settings.embedding_model,
     )
     return AgentRunner(
         llm=get_lmstudio_client(),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
+from collections.abc import Callable
 
 from backend.services.text_processing import tokenize_text
 
@@ -72,7 +73,14 @@ class KeywordIndex:
         self._document_to_chunk_keys.pop(document_id, None)
         self._recompute_avg_doc_len()
 
-    def search(self, query_text: str, top_k: int, document_id: str | None = None) -> list[dict]:
+    def search(
+        self,
+        query_text: str,
+        top_k: int,
+        document_id: str | None = None,
+        predicate: Callable[[dict], bool] | None = None,
+    ) -> list[dict]:
+        """`predicate` recebe os metadados de cada excerto candidato (ver SearchFilters.matches)."""
         query_terms = tokenize_text(query_text)
         if not query_terms or not self._chunks:
             return []
@@ -83,6 +91,8 @@ class KeywordIndex:
 
         if document_id is not None:
             candidate_keys &= self._document_to_chunk_keys.get(document_id, set())
+        if predicate is not None:
+            candidate_keys = {key for key in candidate_keys if predicate(self._chunks[key]["metadata"])}
 
         if not candidate_keys:
             return []

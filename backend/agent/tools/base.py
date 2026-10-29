@@ -6,7 +6,9 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from backend.services.document_registry import DocumentRegistry
+from backend.services.document_types import DocumentTypes
 from backend.services.export_store import ExportStore
+from backend.services.extraction_review import ExtractionStore
 from backend.services.rag_pipeline import RagPipeline
 from backend.services.vector_store import VectorStore
 
@@ -25,6 +27,11 @@ class ToolContext:
     export_store: ExportStore
     top_k: int = 4
     default_document_id: str | None = None
+    # Ficha dos documentos, tipos configurados e índice de documentos (um vetor por documento).
+    extraction_store: ExtractionStore | None = None
+    document_types: DocumentTypes | None = None
+    profile_store: VectorStore | None = None
+    embedding_model: str = ""
 
 
 @dataclass

@@ -131,6 +131,7 @@ class SourceChunk(BaseModel):
     text: str
     document_chunk_count: int | None = None
     lexical_score: float = 0.0
+    section: str | None = None
 
 
 class RetrievalDiagnostic(BaseModel):

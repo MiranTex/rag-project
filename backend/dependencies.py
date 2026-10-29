@@ -1,8 +1,10 @@
+import logging
 from functools import lru_cache
 
 from backend.agent.guard import ScopeGuard
 from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_settings
+from backend.services.document_profiles import upsert_profile
 from backend.services.document_registry import DocumentRegistry
 from backend.services.export_store import ExportStore
 from backend.services.document_types import DocumentTypes, load_document_types
@@ -36,6 +38,41 @@ def get_vector_store() -> VectorStore:
         port=settings.chroma_port,
         collection_name=settings.chroma_collection,
     )
+
+
+# Secções que não descrevem o assunto do documento (para o vetor de um documento sem resumo).
+NON_CONTENT_SECTIONS = {"front_matter", "references", "appendix"}
+
+logger = logging.getLogger(__name__)
+
+
+def document_body(chunks: list[dict]) -> str:
+    ordered = sorted(chunks, key=lambda c: c["metadata"].get("chunk_index", 0))
+    return " ".join(c["text"] for c in ordered if c["metadata"].get("section") not in NON_CONTENT_SECTIONS)
+
+
+@lru_cache(maxsize=1)
+def get_profile_store() -> VectorStore:
+    """Índice de documentos (um vetor por documento). Na primeira utilização cria os vetores que faltam
+    para documentos indexados antes de este índice existir."""
+    settings = get_settings()
+    store = VectorStore(
+        host=settings.chroma_host,
+        port=settings.chroma_port,
+        collection_name=f"{settings.chroma_collection}_profiles",
+    )
+    try:
+        existing = store.list_ids()
+        for info in get_registry().list_documents():
+            if info.status != "indexed" or info.document_id in existing:
+                continue
+            metadata = get_extraction_store().load_metadata(info.document_id)
+            body = document_body(get_vector_store().list_chunks(info.document_id))
+            upsert_profile(store, settings.embedding_model, info, metadata, get_document_types().get(metadata.document_type), body)
+            logger.info("Índice de documentos: vetor criado para %s", info.filename)
+    except Exception:
+        logger.warning("Não foi possível completar o índice de documentos", exc_info=True)
+    return store
 
 
 @lru_cache(maxsize=1)

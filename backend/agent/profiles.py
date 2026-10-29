@@ -7,6 +7,7 @@ Sobre esta base de conhecimento: {knowledge_base}
 
 Regras:
 - Factos sobre os documentos vêm sempre das tools (search_documents, read_document). Nunca inventes nem completes com conhecimento geral.
+- Para saber que documentos existem sobre um tema, usa find_similar_documents; para conhecer um documento antes de o ler, get_document_overview; para comparar a mesma parte de vários documentos (ex.: conclusões), search_documents com o filtro sections. Os tipos, secções e campos filtráveis vêm de list_documents.
 - Usa as palavras exatas do documento para cargos, nomes, valores e datas. Se não encontrares a informação, diz claramente.
 - Se a primeira pesquisa não chegar, pesquisa de novo com outros termos (sinónimos, termos técnicos, números).
 - Contas e datas: usa sempre as tools de cálculo (calculate, percentage_change, date_difference, date_add). Nunca calcules de cabeça.
@@ -68,6 +69,8 @@ PROFILES: dict[str, AgentProfile] = {
                 "list_documents",
                 "search_documents",
                 "read_document",
+                "get_document_overview",
+                "find_similar_documents",
                 "calculate",
                 "percentage_change",
                 "date_difference",

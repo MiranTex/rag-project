@@ -28,7 +28,7 @@ def test_answer_prompt_is_more_strict_with_context() -> None:
 
 
 class _FakeVectorStore:
-    def query(self, query_embedding: list[float], top_k: int, document_id: str | None = None) -> list[dict]:
+    def query(self, query_embedding: list[float], top_k: int, document_id: str | None = None, where: dict | None = None) -> list[dict]:
         return [
             {
                 "text": "Trecho genérico sem muita relação com a pergunta.",

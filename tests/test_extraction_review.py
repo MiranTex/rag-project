@@ -118,6 +118,14 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(documents_api, "get_keyword_index", lambda: state["keywords"])
     monkeypatch.setattr(documents_api, "embed_texts", lambda model, texts: [[0.0] for _ in texts])
     monkeypatch.setattr(documents_api, "get_utility_llm", lambda: _FakeLLM())
+    # Índice de documentos falso: os testes não tocam no Chroma nem no modelo de embeddings.
+    state["profiles"] = []
+    monkeypatch.setattr(documents_api, "get_profile_store", lambda: state["vectors"])
+    monkeypatch.setattr(
+        documents_api,
+        "upsert_profile",
+        lambda store, model, info, metadata, doc_type, body: state["profiles"].append((info.document_id, doc_type.key, body)),
+    )
 
     app = FastAPI()
     app.include_router(documents_api.router)
@@ -241,6 +249,10 @@ def test_metadata_and_sections_flow_into_indexed_chunks(env):
     assert {c["section"] for c in chunks} == {"abstract", "introduction", "conclusion", "references"}
     assert all(c["title"] == "Recomendação de Livros" and c["year"] == 2024 for c in chunks)
     assert all(c["document_type"] == "academic" and c["course"] == "Licenciatura em EI" for c in chunks)
+    # O vetor do documento usa o corpo sem as referências.
+    [(profile_id, profile_type, body)] = env["profiles"]
+    assert profile_id == doc_id and profile_type == "academic"
+    assert "bibliotecas têm catálogos" in body and "Silva, J." not in body
     assert env["store"].load_metadata(doc_id).references == [
         "Silva, J. (2020). Sistemas de recomendação. Lisboa: Editora."
     ]

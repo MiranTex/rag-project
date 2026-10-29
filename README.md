@@ -452,3 +452,26 @@ Para outro domínio (contratos, atas, relatórios de auditoria...), acrescenta-s
 Variáveis: `METADATA_EXTRACTION_ENABLED`, `DOCUMENT_TYPES_FILE` e `KNOWLEDGE_BASE_DESCRIPTION`.
 
 Documentos indexados antes desta aula não têm ficha nem secções. Para os ter, é preciso extrair de novo (reindex).
+
+## Aula 15: Explorar a base de conhecimento
+
+Tools do agente para descobrir e comparar documentos, e não só para encontrar excertos. Funcionam com qualquer tipo de documento configurado.
+
+| Tool | Para quê |
+|---|---|
+| `list_documents` | Documentos com a ficha resumida (tipo, título, ano, campos filtráveis), mais os tipos da base com as secções e os campos que servem de filtro |
+| `search_documents` | Pesquisa híbrida com filtros: `document_type`, `year_from`/`year_to`, `sections` (ex.: `["conclusion"]`) e `fields` (campos `filterable` da ficha) |
+| `find_similar_documents` | Documentos (não excertos) sobre um tema (`query`) ou parecidos com outro (`document_id`), com os mesmos filtros |
+| `get_document_overview` | Ficha e estrutura de um documento: secções com as páginas onde estão e número de referências |
+| `read_document` | Agora também lê só uma secção (`section`) |
+
+**Filtros** (`backend/services/search_filters.py`):
+- Uma única especificação gera o `where` do Chroma e o predicado do índice de palavras-chave, por isso os dois caminhos da pesquisa híbrida filtram da mesma forma.
+- Chaves desconhecidas (tipo, secção ou campo) devolvem ao modelo um erro com as opções válidas, para ele se corrigir.
+
+**Índice de documentos** (`backend/services/document_profiles.py`):
+- Fica numa segunda coleção do Chroma (`<CHROMA_COLLECTION>_profiles`), com um vetor por documento.
+- O texto desse vetor é o título, as palavras-chave e o resumo; sem resumo, usa o início do corpo, sem elementos iniciais, referências nem anexos.
+- O vetor é criado na aprovação e apagado quando o documento volta à revisão ou é removido.
+- Documentos indexados antes deste índice recebem o vetor automaticamente na primeira utilização.
+

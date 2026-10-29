@@ -11,9 +11,11 @@ from fastapi.concurrency import run_in_threadpool
 
 from backend.config import get_settings
 from backend.dependencies import (
+    NON_CONTENT_SECTIONS,
     get_document_types,
     get_extraction_store,
     get_keyword_index,
+    get_profile_store,
     get_utility_llm,
     get_registry,
     get_vector_store,
@@ -32,6 +34,7 @@ from backend.models import (
     SectionHeading,
     UploadResponse,
 )
+from backend.services.document_profiles import upsert_profile
 from backend.services.document_structure import Heading, Segment, find_references, split_sections
 from backend.services.document_types import DocumentType, section_label
 from backend.services.embeddings import embed_texts
@@ -165,6 +168,7 @@ def _extract_for_review(document_id: str, filename: str, raw: bytes) -> tuple[Do
     # O documento sai do índice até ser aprovado: a pesquisa nunca usa texto por rever.
     get_vector_store().delete_document(document_id)
     get_keyword_index().remove_document(document_id)
+    get_profile_store().delete_document(document_id)
     get_extraction_store().save(document_id, pages)
     metadata = _propose_metadata(pages)
     get_extraction_store().save_metadata(document_id, metadata)
@@ -276,6 +280,8 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
         metadatas=metadatas,
     )
     keyword_index.index_document(info.document_id, keyword_chunks)
+    body = " ".join(segment.text for segment in segments if segment.section not in NON_CONTENT_SECTIONS)
+    upsert_profile(get_profile_store(), settings.embedding_model, info, document_metadata, doc_type, body)
 
     indexed = _with_metadata(_with_counts(info, pages), document_metadata).model_copy(
         update={"chunk_count": len(chunks), "status": "indexed"}
@@ -355,6 +361,7 @@ def delete_document(document_id: str) -> dict:
 
     vector_store.delete_document(document_id)
     keyword_index.remove_document(document_id)
+    get_profile_store().delete_document(document_id)
     registry.remove(document_id)
     get_extraction_store().delete(document_id)
 
