@@ -391,3 +391,48 @@ Com `AUTO_APPROVE_CLEAN_DOCUMENTS=true`, os documentos sem alertas saltam o pass
 | `POST /documents/{id}/approve` | Indexa o texto revisto |
 
 Só se edita um documento `pending_review`. Para rever um documento já indexado, usar reindex: volta a extrair do zero (as edições manuais perdem-se) e o documento sai do índice até nova aprovação. Documentos indexados antes desta fase não têm extração guardada; aparecem como indexados e precisam de reindex para serem revistos.
+
+## Aula 14: Ficha do trabalho e secções
+
+Para um corpus de trabalhos finais de curso, cada documento passa a ter uma ficha e cada excerto passa a saber de que secção vem. Tudo é proposto na extração e confirmado no ecrã de revisão.
+
+**Secções por regras** (`backend/services/document_structure.py`): os títulos são reconhecidos linha a linha, em PT e EN, com ou sem numeração ("2.", "5.1", "Capítulo 3"):
+
+| Secção | Exemplos de título |
+|---|---|
+| `abstract` | Resumo, Abstract |
+| `introduction` | Introdução |
+| `literature` | Estado da arte, Revisão da literatura, Enquadramento teórico |
+| `methodology` | Metodologia, Métodos |
+| `development` | Qualquer capítulo numerado sem nome conhecido ("3 Arquitetura do sistema") |
+| `results` | Resultados, Apresentação e discussão dos resultados |
+| `conclusion` | Conclusões, Considerações finais |
+| `future_work` | Trabalho futuro |
+| `limitations` | Limitações |
+| `references` | Referências, Bibliografia |
+| `appendix` | Anexos, Apêndice B |
+| `front_matter` | Capa, agradecimentos, índice, listas |
+
+- As entradas do índice (reticências, ou "Título 12" depois de um título "Índice") não contam como títulos.
+- O contador de página que o pypdf cola à primeira linha ("16/80 2 COVID – 19") é ignorado.
+- Com menos de 2 títulos (contratos, faturas...), o documento fica sem secções.
+- A extração passou a preservar as quebras de linha, porque os títulos só se reconhecem linha a linha.
+
+**Ficha** (`backend/services/metadata_extraction.py`):
+- Resumo, palavras-chave e referências saem do texto por regras.
+- Título, autores, orientadores, ano, curso e instituição são propostos pelo modelo pequeno (`GUARD_MODEL`, o mesmo da guarda), a partir das 3 primeiras páginas. Este modelo aceita `tool_choice` forçado, que alguns modelos de chat recusam.
+- Se o modelo falhar, a ficha fica por preencher e pode ser escrita à mão ou pedida de novo.
+
+**Na aprovação**:
+- Cada chunk leva `section` e, quando preenchidos, `title`, `year` e `course`.
+- As referências são gravadas a partir do texto revisto.
+
+| Endpoint | Descrição |
+|---|---|
+| `GET /documents/{id}/extraction` | Inclui `metadata`, `sections` (títulos detetados) e `references` |
+| `PUT /documents/{id}/metadata` | Grava a ficha |
+| `POST /documents/{id}/metadata/suggest` | Pede nova proposta ao modelo; só preenche campos vazios |
+
+Variável: `METADATA_EXTRACTION_ENABLED` (por defeito `true`).
+
+Documentos indexados antes desta aula não têm ficha nem secções. Para os ter, é preciso extrair de novo (reindex).

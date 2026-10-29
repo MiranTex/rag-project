@@ -80,15 +80,19 @@ def get_tool_registry() -> ToolRegistry:
 
 
 @lru_cache(maxsize=1)
-def get_scope_guard() -> ScopeGuard:
+def get_utility_llm() -> LMStudioClient:
+    """Modelo pequeno e barato para tarefas curtas e estruturadas (classificar, extrair campos), que não
+    respondem ao utilizador. Também aceita tool_choice forçado, ao contrário de alguns modelos de chat."""
     settings = get_settings()
     if settings.open_router_api_key:
-        # Modelo pequeno e barato: só classifica, não responde.
-        llm = LMStudioClient(
+        return LMStudioClient(
             base_url=settings.open_router_base_url,
             model=settings.guard_model,
             api_key=settings.open_router_api_key,
         )
-    else:
-        llm = get_lmstudio_client()
-    return ScopeGuard(llm)
+    return get_lmstudio_client()
+
+
+@lru_cache(maxsize=1)
+def get_scope_guard() -> ScopeGuard:
+    return ScopeGuard(get_utility_llm())

@@ -10,22 +10,34 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from backend.config import get_settings
-from backend.dependencies import get_extraction_store, get_keyword_index, get_registry, get_vector_store
+from backend.dependencies import (
+    get_extraction_store,
+    get_keyword_index,
+    get_utility_llm,
+    get_registry,
+    get_vector_store,
+)
 from backend.models import (
     DocumentExtraction,
     DocumentInfo,
+    DocumentMetadata,
+    MetadataUpdate,
     PageAlert,
     PageOcrRequest,
     PageUpdateRequest,
     ReviewPage,
+    SectionHeading,
     UploadResponse,
 )
+from backend.services.document_structure import SECTION_LABELS, Heading, Segment, find_references, split_sections
 from backend.services.embeddings import embed_texts
 from backend.services.extraction_review import validate_page
+from backend.services.metadata_extraction import propose_metadata
 from backend.services.ocr import ocr_image, render_page
 from backend.services.pdf_ingestion import (
     chunk_pages,
     count_pages,
+    normalize_text,
     extract_pages,
     file_sha256,
     save_uploaded_file,
@@ -70,6 +82,35 @@ def _with_counts(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
     return info.model_copy(update={"page_count": len(pages), "alert_count": alert_count})
 
 
+def _with_metadata(info: DocumentInfo, metadata: DocumentMetadata) -> DocumentInfo:
+    return info.model_copy(update={"title": metadata.title, "year": metadata.year})
+
+
+def _structure(pages: list[ReviewPage]) -> tuple[list[Segment], list[Heading]]:
+    """Secções do texto revisto: só páginas incluídas e com texto."""
+    return split_sections([(page.page, page.text) for page in pages if not page.excluded and page.text.strip()])
+
+
+def _propose_metadata(pages: list[ReviewPage]) -> DocumentMetadata:
+    segments, headings = _structure(pages)
+    llm = get_utility_llm() if get_settings().metadata_extraction_enabled else None
+    return propose_metadata([(page.page, page.text) for page in pages if page.text.strip()], segments, headings, llm)
+
+
+def _build_extraction(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentExtraction:
+    segments, headings = _structure(pages)
+    return DocumentExtraction(
+        document=info,
+        pages=pages,
+        metadata=get_extraction_store().load_metadata(info.document_id),
+        sections=[
+            SectionHeading(section=h.section, label=SECTION_LABELS[h.section], page=h.page, text=h.text)
+            for h in headings
+        ],
+        references=find_references(segments),
+    )
+
+
 def _extract_for_review(document_id: str, filename: str, raw: bytes) -> tuple[DocumentInfo, list[ReviewPage]]:
     """Fase 1: extrai o texto (pypdf + OCR), valida cada página e deixa o documento à espera de revisão."""
     settings = get_settings()
@@ -109,6 +150,8 @@ def _extract_for_review(document_id: str, filename: str, raw: bytes) -> tuple[Do
     get_vector_store().delete_document(document_id)
     get_keyword_index().remove_document(document_id)
     get_extraction_store().save(document_id, pages)
+    metadata = _propose_metadata(pages)
+    get_extraction_store().save_metadata(document_id, metadata)
 
     info = _with_counts(
         DocumentInfo(
@@ -118,16 +161,19 @@ def _extract_for_review(document_id: str, filename: str, raw: bytes) -> tuple[Do
             created_at=utc_now_iso(),
             chunk_count=0,
             status="pending_review",
+            title=metadata.title,
+            year=metadata.year,
         ),
         pages,
     )
     get_registry().add_or_replace(info)
     logger.info(
-        "%s extraído em %.1fs: %d página(s), %d alerta(s)",
+        "%s extraído em %.1fs: %d página(s), %d alerta(s), ficha %s",
         filename,
         time.perf_counter() - started,
         info.page_count,
         info.alert_count,
+        "proposta" if metadata.auto_filled else "por preencher",
     )
     return info, pages
 
@@ -144,8 +190,9 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
         raise HTTPException(status_code=400, detail="Nenhuma página com texto para indexar.")
 
     pages_by_number = {page.page: page for page in included}
+    segments, headings = _structure(pages)
     chunks = chunk_pages(
-        pages=[(page.page, page.text) for page in included],
+        pages=[(segment.page, segment.text, segment.section) for segment in segments],
         document_id=info.document_id,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
@@ -155,10 +202,31 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
         raise HTTPException(status_code=400, detail="Não foram gerados chunks válidos.")
 
     texts = [chunk.text for chunk in chunks]
-    logger.info("%s: %d página(s) aprovada(s), %d chunks; a gerar embeddings", info.filename, len(included), len(chunks))
+    logger.info(
+        "%s: %d página(s) aprovada(s), %d secção(ões), %d chunks; a gerar embeddings",
+        info.filename,
+        len(included),
+        len(headings),
+        len(chunks),
+    )
     embeddings = embed_texts(settings.embedding_model, texts)
 
     vector_store.delete_document(info.document_id)
+
+    # As referências gravadas são as do texto aprovado (incluindo correções feitas na revisão).
+    store = get_extraction_store()
+    document_metadata = store.load_metadata(info.document_id).model_copy(update={"references": find_references(segments)})
+    store.save_metadata(info.document_id, document_metadata)
+    # O Chroma só aceita valores escalares e não aceita None: só entram os campos preenchidos.
+    document_fields = {
+        key: value
+        for key, value in {
+            "title": document_metadata.title,
+            "year": document_metadata.year,
+            "course": document_metadata.course,
+        }.items()
+        if value
+    }
 
     metadatas: list[dict] = []
     keyword_chunks: list[dict] = []
@@ -172,7 +240,10 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
             "document_chunk_count": chunk.document_chunk_count,
             "extraction": page.source,
             "edited": page.edited,
+            **document_fields,
         }
+        if chunk.section:
+            metadata["section"] = chunk.section
         if page.ocr_confidence is not None:
             metadata["ocr_confidence"] = page.ocr_confidence
         metadatas.append(metadata)
@@ -186,7 +257,9 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
     )
     keyword_index.index_document(info.document_id, keyword_chunks)
 
-    indexed = _with_counts(info, pages).model_copy(update={"chunk_count": len(chunks), "status": "indexed"})
+    indexed = _with_metadata(_with_counts(info, pages), document_metadata).model_copy(
+        update={"chunk_count": len(chunks), "status": "indexed"}
+    )
     get_registry().add_or_replace(indexed)
     logger.info("%s indexado em %.1fs", info.filename, time.perf_counter() - started)
     return indexed
@@ -234,7 +307,7 @@ def _save_page(info: DocumentInfo, pages: list[ReviewPage], updated: ReviewPage)
     get_extraction_store().save(info.document_id, pages)
     info = _with_counts(info, pages)
     get_registry().add_or_replace(info)
-    return DocumentExtraction(document=info, pages=pages)
+    return _build_extraction(info, pages)
 
 
 def _find_page(pages: list[ReviewPage], page_number: int) -> ReviewPage:
@@ -324,7 +397,7 @@ async def upload_document(
 @router.get("/{document_id}/extraction", response_model=DocumentExtraction)
 def get_extraction(document_id: str) -> DocumentExtraction:
     info, pages = _get_document_and_pages(document_id)
-    return DocumentExtraction(document=info, pages=pages)
+    return _build_extraction(info, pages)
 
 
 @router.put("/{document_id}/pages/{page_number}", response_model=DocumentExtraction)
@@ -359,7 +432,7 @@ async def rerun_page_ocr(document_id: str, page_number: int, payload: PageOcrReq
                 raise HTTPException(status_code=404, detail="Ficheiro original não encontrado no storage local.")
 
             result = ocr_image(render_page(upload_path, page_number, dpi), settings.ocr_languages)
-            text = " ".join(result.text.split())
+            text = normalize_text(result.text)
             source = "ocr" if text else "none"
             confidence = result.confidence if text else None
             logger.info("%s p.%d: OCR repetido a %d dpi, confiança %.1f", info.filename, page_number, dpi, result.confidence)
@@ -373,6 +446,62 @@ async def rerun_page_ocr(document_id: str, page_number: int, payload: PageOcrReq
                 }
             )
             return _save_page(info, pages, updated)
+
+    return await run_in_threadpool(run)
+
+
+def _clean_text_list(values: list[str]) -> list[str]:
+    return [" ".join(value.split()) for value in values if value.strip()]
+
+
+@router.put("/{document_id}/metadata", response_model=DocumentExtraction)
+def update_metadata(document_id: str, payload: MetadataUpdate) -> DocumentExtraction:
+    with _locked(document_id):
+        info, pages = _get_document_and_pages(document_id)
+        _require_pending(info)
+        store = get_extraction_store()
+        metadata = store.load_metadata(document_id).model_copy(
+            update={
+                "title": " ".join(payload.title.split()),
+                "authors": _clean_text_list(payload.authors),
+                "advisors": _clean_text_list(payload.advisors),
+                "year": payload.year,
+                "course": " ".join(payload.course.split()),
+                "institution": " ".join(payload.institution.split()),
+                "keywords": _clean_text_list(payload.keywords),
+                "abstract": payload.abstract.strip(),
+            }
+        )
+        store.save_metadata(document_id, metadata)
+        info = _with_metadata(info, metadata)
+        get_registry().add_or_replace(info)
+        return _build_extraction(info, pages)
+
+
+@router.post("/{document_id}/metadata/suggest", response_model=DocumentExtraction)
+async def suggest_metadata(document_id: str) -> DocumentExtraction:
+    """Volta a propor a ficha (útil se o LLM estava em baixo na extração). Só preenche campos vazios,
+    para não apagar correções feitas à mão."""
+
+    def run() -> DocumentExtraction:
+        with _locked(document_id):
+            info, pages = _get_document_and_pages(document_id)
+            _require_pending(info)
+            store = get_extraction_store()
+            current = store.load_metadata(document_id)
+            proposed = _propose_metadata(pages)
+            if not proposed.auto_filled:
+                raise HTTPException(status_code=502, detail="Não foi possível obter uma proposta do modelo.")
+            filled = {
+                field: getattr(proposed, field)
+                for field in ("title", "authors", "advisors", "year", "course", "institution", "keywords", "abstract")
+                if not getattr(current, field) and getattr(proposed, field)
+            }
+            metadata = current.model_copy(update={**filled, "auto_filled": True})
+            store.save_metadata(document_id, metadata)
+            info = _with_metadata(info, metadata)
+            get_registry().add_or_replace(info)
+            return _build_extraction(info, pages)
 
     return await run_in_threadpool(run)
 

@@ -20,6 +20,7 @@ class ChunkRecord:
     page: int
     chunk_index: int
     document_chunk_count: int = 0
+    section: str | None = None
 
 
 @dataclass
@@ -28,6 +29,13 @@ class ExtractedPage:
     text: str
     source: str  # "text" (camada de texto do PDF) ou "ocr"
     ocr_confidence: float | None = None
+
+
+def normalize_text(text: str) -> str:
+    """Normaliza espaços dentro de cada linha mas mantém as quebras: os títulos de secção e as entradas
+    da bibliografia só se reconhecem linha a linha."""
+    lines = (" ".join(line.split()) for line in text.splitlines())
+    return "\n".join(line for line in lines if line)
 
 
 def file_sha256(content: bytes) -> str:
@@ -61,7 +69,7 @@ def extract_pages(
     pages: list[ExtractedPage] = []
     ocr_candidates: list[int] = []
     for i, page in enumerate(reader.pages, start=1):
-        text = " ".join((page.extract_text() or "").split())
+        text = normalize_text(page.extract_text() or "")
         if len(text) >= ocr_min_text_chars:
             pages.append(ExtractedPage(page=i, text=text, source="text"))
         else:
@@ -92,7 +100,7 @@ def extract_pages(
                 pages.append(
                     ExtractedPage(
                         page=page_number,
-                        text=" ".join(result.text.split()),
+                        text=normalize_text(result.text),
                         source="ocr",
                         ocr_confidence=result.confidence,
                     )
@@ -149,15 +157,18 @@ def _finalize_chunk(text: str) -> str:
 
 
 def chunk_pages(
-    pages: list[tuple[int, str]],
+    pages: list[tuple[int, str]] | list[tuple[int, str, str | None]],
     document_id: str,
     chunk_size: int,
     chunk_overlap: int,
 ) -> list[ChunkRecord]:
+    """Divide cada segmento em chunks. Um segmento é (página, texto) ou (página, texto, secção);
+    os chunks nunca atravessam segmentos, por isso cada chunk pertence a uma única secção."""
     chunks: list[ChunkRecord] = []
     global_chunk_index = 0
 
-    for page, page_text in pages:
+    for page, page_text, *rest in pages:
+        section = rest[0] if rest else None
         normalized_text = re.sub(r"\s+", " ", page_text).strip()
         if not normalized_text:
             continue
@@ -183,6 +194,7 @@ def chunk_pages(
                         text=chunk_text,
                         page=page,
                         chunk_index=global_chunk_index,
+                        section=section,
                     )
                 )
                 global_chunk_index += 1
@@ -202,6 +214,7 @@ def chunk_pages(
                     text=chunk_text,
                     page=page,
                     chunk_index=global_chunk_index,
+                    section=section,
                 )
             )
             global_chunk_index += 1

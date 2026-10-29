@@ -133,8 +133,11 @@ function DocumentItem({ doc, onReview, onReindex, onDelete }) {
       >
         <FileText className={`mt-0.5 size-4 shrink-0 ${pending ? "text-accent-500" : "text-stone-400 dark:text-stone-500"}`} />
         <span className="min-w-0">
-          <span className="block truncate text-sm text-stone-800 dark:text-stone-200" title={doc.filename}>
-            {doc.filename}
+          <span
+            className="block truncate text-sm text-stone-800 dark:text-stone-200"
+            title={doc.title ? `${doc.title}\n${doc.filename}` : doc.filename}
+          >
+            {doc.title || doc.filename}
           </span>
           <span className="block text-xs text-stone-500 dark:text-stone-400">
             {pending ? (
@@ -143,6 +146,7 @@ function DocumentItem({ doc, onReview, onReindex, onDelete }) {
               </span>
             ) : (
               <>
+                {doc.year && `${doc.year} · `}
                 {doc.page_count > 0 && `${doc.page_count} pág. · `}
                 {doc.chunk_count} excertos
               </>

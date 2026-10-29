@@ -1,3 +1,4 @@
+import json
 import shutil
 
 import pytest
@@ -78,6 +79,20 @@ class _FakeKeywordIndex:
         self.documents.pop(document_id, None)
 
 
+class _FakeLLM:
+    def complete(self, messages, tools=None, tool_choice=None, temperature=0.2):
+        arguments = {
+            "title": "Recomendação de Livros",
+            "authors": ["Ana Martins"],
+            "advisors": [],
+            "year": 2024,
+            "course": "Engenharia Informática",
+            "institution": "",
+            "keywords": [],
+        }
+        return {"tool_calls": [{"function": {"arguments": json.dumps(arguments)}}]}
+
+
 def _image_only_pdf(path, lines):
     image = Image.new("L", (1700, 2200), color=255)
     draw = ImageDraw.Draw(image)
@@ -103,6 +118,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(documents_api, "get_vector_store", lambda: state["vectors"])
     monkeypatch.setattr(documents_api, "get_keyword_index", lambda: state["keywords"])
     monkeypatch.setattr(documents_api, "embed_texts", lambda model, texts: [[0.0] for _ in texts])
+    monkeypatch.setattr(documents_api, "get_utility_llm", lambda: _FakeLLM())
 
     app = FastAPI()
     app.include_router(documents_api.router)
@@ -183,3 +199,44 @@ def test_auto_approve_indexes_clean_documents(env):
 
     assert doc["status"] == "indexed"
     assert doc["chunk_count"] == 1
+
+
+THESIS_TEXT = (
+    "Resumo\nEste trabalho estuda recomendação de livros.\nPalavras-chave: recomendação; bibliotecas\n"
+    "1. Introdução\nAs bibliotecas têm catálogos grandes e os leitores perdem-se neles.\n"
+    "2. Conclusões\nO sistema melhora as sugestões.\n"
+    "Referências\nSilva, J. (2020). Sistemas de recomendação. Lisboa: Editora."
+)
+
+
+def test_metadata_and_sections_flow_into_indexed_chunks(env):
+    client = env["client"]
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+
+    # Página sem texto: nada para propor na extração.
+    extraction = client.get(f"/documents/{doc_id}/extraction").json()
+    assert extraction["metadata"]["title"] == "" and extraction["sections"] == []
+
+    extraction = client.put(f"/documents/{doc_id}/pages/1", json={"text": THESIS_TEXT}).json()
+    assert [s["section"] for s in extraction["sections"]] == ["abstract", "introduction", "conclusion", "references"]
+    assert extraction["references"] == ["Silva, J. (2020). Sistemas de recomendação. Lisboa: Editora."]
+
+    # A sugestão só preenche campos vazios: o curso escrito à mão mantém-se.
+    client.put(f"/documents/{doc_id}/metadata", json={"course": "Licenciatura em EI", "keywords": [" a ", ""]})
+    extraction = client.post(f"/documents/{doc_id}/metadata/suggest").json()
+    metadata = extraction["metadata"]
+    assert metadata["title"] == "Recomendação de Livros" and metadata["year"] == 2024
+    assert metadata["course"] == "Licenciatura em EI"
+    assert metadata["keywords"] == ["a"]
+    assert extraction["document"]["title"] == "Recomendação de Livros"
+
+    res = client.post(f"/documents/{doc_id}/approve")
+    assert res.json()["document"]["year"] == 2024
+
+    chunks = [c["metadata"] for c in env["vectors"].chunks.values()]
+    assert {c["section"] for c in chunks} == {"abstract", "introduction", "conclusion", "references"}
+    assert all(c["title"] == "Recomendação de Livros" and c["year"] == 2024 for c in chunks)
+    assert env["store"].load_metadata(doc_id).references == [
+        "Silva, J. (2020). Sistemas de recomendação. Lisboa: Editora."
+    ]
+    assert client.put(f"/documents/{doc_id}/metadata", json={"title": "x"}).status_code == 409

@@ -106,6 +106,26 @@ export async function rerunPageOcr(documentId, page, dpi = null) {
   return data;
 }
 
+export async function updateMetadata(documentId, metadata) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/metadata`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(metadata),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao guardar a ficha");
+  return data;
+}
+
+export async function suggestMetadata(documentId) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/metadata/suggest`, {
+    method: "POST",
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao preencher a ficha");
+  return data;
+}
+
 export async function approveDocument(documentId) {
   const res = await fetch(`${API_BASE}/documents/${documentId}/approve`, {
     method: "POST",

@@ -16,6 +16,9 @@ class DocumentInfo(BaseModel):
     status: DocumentStatus = "indexed"
     page_count: int = 0
     alert_count: int = 0
+    # Resumo da ficha (ver DocumentMetadata) para a listagem; a ficha completa fica com a extração.
+    title: str = ""
+    year: int | None = None
 
 
 class UploadResponse(BaseModel):
@@ -38,9 +41,46 @@ class ReviewPage(BaseModel):
     edited: bool = False
 
 
+class DocumentMetadata(BaseModel):
+    """Ficha de um trabalho académico. Proposta na extração (regras + LLM) e confirmada na revisão."""
+
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    advisors: list[str] = Field(default_factory=list)
+    year: int | None = Field(default=None, ge=1900, le=2100)
+    course: str = ""
+    institution: str = ""
+    keywords: list[str] = Field(default_factory=list)
+    abstract: str = ""
+    # Só gravadas na aprovação, a partir do texto revisto (ver GET /extraction para a versão atual).
+    references: list[str] = Field(default_factory=list)
+    auto_filled: bool = False
+
+
+class MetadataUpdate(BaseModel):
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    advisors: list[str] = Field(default_factory=list)
+    year: int | None = Field(default=None, ge=1900, le=2100)
+    course: str = ""
+    institution: str = ""
+    keywords: list[str] = Field(default_factory=list)
+    abstract: str = ""
+
+
+class SectionHeading(BaseModel):
+    section: str
+    label: str
+    page: int
+    text: str
+
+
 class DocumentExtraction(BaseModel):
     document: DocumentInfo
     pages: list[ReviewPage]
+    metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
+    sections: list[SectionHeading] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
 
 
 class PageUpdateRequest(BaseModel):

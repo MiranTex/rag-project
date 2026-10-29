@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, X } from "lucide-react";
-import { approveDocument, getExtraction, rerunPageOcr, updatePage } from "../api";
+import { approveDocument, getExtraction, rerunPageOcr, suggestMetadata, updateMetadata, updatePage } from "../api";
+import { MetadataCard, StructureCard, fromDraft, toDraft } from "./ReviewDetails";
 
 const SOURCE_LABELS = {
   text: "Texto do PDF",
@@ -20,7 +21,8 @@ function ReviewPage({ page, readOnly, busy, onSave, onToggleExcluded, onRerunOcr
 
   return (
     <article
-      className={`rounded-xl border bg-white dark:bg-stone-900 transition-opacity ${
+      id={`review-page-${page.page}`}
+      className={`scroll-mt-4 rounded-xl border bg-white dark:bg-stone-900 transition-opacity ${
         hasAlerts && !page.excluded ? "border-amber-300 dark:border-amber-700/60" : "border-stone-200 dark:border-stone-800"
       } ${page.excluded ? "opacity-50" : ""}`}
     >
@@ -59,7 +61,7 @@ function ReviewPage({ page, readOnly, busy, onSave, onToggleExcluded, onRerunOcr
       <textarea
         value={draft}
         readOnly={readOnly}
-        rows={Math.min(14, Math.max(4, Math.ceil(draft.length / 95)))}
+        rows={Math.min(14, Math.max(4, draft.split("\n").length, Math.ceil(draft.length / 95)))}
         placeholder={readOnly ? "" : "Nenhum texto extraído. Podes escrever aqui o texto da página."}
         onChange={(e) => setDraft(e.target.value)}
         className="block w-full resize-y bg-transparent px-4 py-3 font-mono text-[13px] leading-relaxed text-stone-800 dark:text-stone-200 outline-none placeholder:font-sans placeholder:text-stone-400 dark:placeholder:text-stone-500"
@@ -121,11 +123,13 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
   const [error, setError] = useState("");
   const [working, setWorking] = useState("A carregar…");
   const [onlyAlerts, setOnlyAlerts] = useState(false);
+  const [metaDraft, setMetaDraft] = useState(null);
 
   useEffect(() => {
     getExtraction(documentId)
       .then((data) => {
         setExtraction(data);
+        setMetaDraft(toDraft(data.metadata));
         setOnlyAlerts(data.document.alert_count > 0 && data.pages.length > 5);
       })
       .catch((err) => setError(err.message))
@@ -140,11 +144,14 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose, working]);
 
-  async function run(label, action) {
+  // syncMeta: a resposta traz uma ficha nova (guardada ou sugerida) que substitui o rascunho.
+  async function run(label, action, { syncMeta = false } = {}) {
     setWorking(label);
     setError("");
     try {
-      setExtraction(await action());
+      const data = await action();
+      setExtraction(data);
+      if (syncMeta) setMetaDraft(toDraft(data.metadata));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -156,6 +163,7 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
     setWorking("A indexar…");
     setError("");
     try {
+      if (metaDirty) await updateMetadata(documentId, fromDraft(metaDraft));
       const result = await approveDocument(documentId);
       onApproved(result.message);
     } catch (err) {
@@ -164,7 +172,18 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
     }
   }
 
+  function jumpToPage(pageNumber) {
+    setOnlyAlerts(false);
+    requestAnimationFrame(() =>
+      document.getElementById(`review-page-${pageNumber}`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  }
+
   const busy = !!working;
+  const metaDirty =
+    !!extraction &&
+    !!metaDraft &&
+    JSON.stringify(fromDraft(metaDraft)) !== JSON.stringify(fromDraft(toDraft(extraction.metadata)));
   const doc = extraction?.document;
   const pages = extraction?.pages || [];
   const readOnly = doc?.status !== "pending_review";
@@ -185,11 +204,12 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
             <p className="text-xs font-medium text-stone-500 dark:text-stone-400">
               {readOnly ? "Texto indexado" : "Rever antes de indexar"}
             </p>
-            <h2 id="review-title" className="truncate text-lg font-semibold" title={doc?.filename}>
-              {doc?.filename || "…"}
+            <h2 id="review-title" className="truncate text-lg font-semibold" title={doc?.title || doc?.filename}>
+              {doc?.title || doc?.filename || "…"}
             </h2>
             {doc && (
               <p className="mt-0.5 text-sm text-stone-500 dark:text-stone-400">
+                {doc.title && <span className="font-mono text-xs">{doc.filename} · </span>}
                 {doc.page_count} página{doc.page_count !== 1 && "s"}
                 {pagesWithAlerts > 0 ? (
                   <span className="text-amber-700 dark:text-amber-400"> · {pagesWithAlerts} com alertas</span>
@@ -230,6 +250,34 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
               <Loader2 className="size-4 animate-spin" />
               {working}
             </p>
+          )}
+          {extraction && metaDraft && (
+            <>
+              <MetadataCard
+                metadata={extraction.metadata}
+                draft={metaDraft}
+                onDraftChange={setMetaDraft}
+                dirty={metaDirty}
+                readOnly={readOnly}
+                busy={busy}
+                suggesting={working === "A preencher a ficha…"}
+                onSave={() =>
+                  run("A guardar a ficha…", () => updateMetadata(documentId, fromDraft(metaDraft)), { syncMeta: true })
+                }
+                onSuggest={() =>
+                  run(
+                    "A preencher a ficha…",
+                    async () => {
+                      // Guarda primeiro o que foi escrito: a sugestão só preenche campos vazios no servidor.
+                      if (metaDirty) await updateMetadata(documentId, fromDraft(metaDraft));
+                      return suggestMetadata(documentId);
+                    },
+                    { syncMeta: true },
+                  )
+                }
+              />
+              <StructureCard sections={extraction.sections} references={extraction.references} onJumpToPage={jumpToPage} />
+            </>
           )}
           {visiblePages.map((page) => (
             <ReviewPage

@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from threading import Lock
 
-from backend.models import PageAlert, ReviewPage
+from backend.models import DocumentMetadata, PageAlert, ReviewPage
 
 # Palavra "bem formada": letras/dígitos, opcionalmente ligados por - ' . / , : (ex.: "obriga-se", "01/02/2024", "1.500,00").
 _WORD_RE = re.compile(r"^[^\W_]+(?:[-'’./,:][^\W_]+)*$")
@@ -86,5 +86,21 @@ class ExtractionStore:
             return None
         return [ReviewPage(**page) for page in json.loads(path.read_text(encoding="utf-8"))]
 
+    def _metadata_path(self, document_id: str) -> Path:
+        return self.directory / f"{document_id}.metadata.json"
+
+    def save_metadata(self, document_id: str, metadata: DocumentMetadata) -> None:
+        with self._lock:
+            tmp = self._metadata_path(document_id).with_suffix(".tmp")
+            tmp.write_text(metadata.model_dump_json(indent=2), encoding="utf-8")
+            tmp.replace(self._metadata_path(document_id))
+
+    def load_metadata(self, document_id: str) -> DocumentMetadata:
+        path = self._metadata_path(document_id)
+        if not path.exists():
+            return DocumentMetadata()
+        return DocumentMetadata.model_validate_json(path.read_text(encoding="utf-8"))
+
     def delete(self, document_id: str) -> None:
         self._path(document_id).unlink(missing_ok=True)
+        self._metadata_path(document_id).unlink(missing_ok=True)
