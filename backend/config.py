@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     ocr_min_text_chars: int = 30
     ocr_min_confidence: float = 60.0
     ocr_max_workers: int = 4
+    # Fase de revisão: com auto-aprovação, documentos sem alertas são indexados logo após a extração.
+    auto_approve_clean_documents: bool = False
+    review_max_garbled_ratio: float = 0.15
     rerank_weights_default: str = '{"vector": 0.45, "lexical": 0.20, "keyword": 0.20, "position": 0.10, "density": 0.05}'
     rerank_weights_grounding: str = '{"vector": 0.35, "lexical": 0.25, "keyword": 0.25, "position": 0.10, "density": 0.05}'
 

@@ -3,17 +3,53 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+DocumentStatus = Literal["pending_review", "indexed"]
+
+
 class DocumentInfo(BaseModel):
     document_id: str
     filename: str
     sha256: str
     created_at: str
     chunk_count: int
+    # Documentos registados antes da fase de revisão já estavam indexados.
+    status: DocumentStatus = "indexed"
+    page_count: int = 0
+    alert_count: int = 0
 
 
 class UploadResponse(BaseModel):
     message: str
     document: DocumentInfo
+
+
+class PageAlert(BaseModel):
+    code: str
+    message: str
+
+
+class ReviewPage(BaseModel):
+    page: int
+    text: str
+    source: Literal["text", "ocr", "manual", "none"]
+    ocr_confidence: float | None = None
+    alerts: list[PageAlert] = Field(default_factory=list)
+    excluded: bool = False
+    edited: bool = False
+
+
+class DocumentExtraction(BaseModel):
+    document: DocumentInfo
+    pages: list[ReviewPage]
+
+
+class PageUpdateRequest(BaseModel):
+    text: str | None = None
+    excluded: bool | None = None
+
+
+class PageOcrRequest(BaseModel):
+    dpi: int | None = Field(default=None, ge=72, le=600)
 
 
 class AskRequest(BaseModel):

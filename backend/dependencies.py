@@ -5,6 +5,7 @@ from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_settings
 from backend.services.document_registry import DocumentRegistry
 from backend.services.export_store import ExportStore
+from backend.services.extraction_review import ExtractionStore
 from backend.services.keyword_index import KeywordIndex
 from backend.services.lmstudio_client import LMStudioClient
 from backend.services.rag_pipeline import RagPipeline
@@ -14,6 +15,11 @@ from backend.services.vector_store import VectorStore
 @lru_cache(maxsize=1)
 def get_registry() -> DocumentRegistry:
     return DocumentRegistry()
+
+
+@lru_cache(maxsize=1)
+def get_extraction_store() -> ExtractionStore:
+    return ExtractionStore()
 
 
 @lru_cache(maxsize=1)

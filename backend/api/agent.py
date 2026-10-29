@@ -99,7 +99,7 @@ def ask_agent_stream(payload: AgentAskRequest) -> StreamingResponse:
                 decision = get_scope_guard().check(
                     question,
                     history,
-                    document_names=[d.filename for d in get_registry().list_documents()],
+                    document_names=[d.filename for d in get_registry().list_documents() if d.status == "indexed"],
                     blocked_categories=profile.blocked_categories,
                 )
                 yield sse_event("guard", vars(decision))

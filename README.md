@@ -290,17 +290,15 @@ Modelo de chat inválido:
 
 PDF sem texto:
 - Alguns PDFs são apenas imagem.
-- Neste caso é preciso OCR, que ainda não está nesta versão.
+- As páginas sem texto passam por OCR (ver Aula 11) e aparecem na revisão com alerta (ver Aula 13).
 
 Chroma indisponível:
 - Verificar se o container está up com docker compose ps.
 
 ## Próximos passos sugeridos
 
-1. Adicionar OCR para PDFs digitalizados.
-2. Adicionar streaming de resposta no chat.
-3. Adicionar autenticação simples para múltiplos utilizadores.
-4. Evoluir filtros por documento, período e tags.
+1. Adicionar autenticação simples para múltiplos utilizadores.
+2. Evoluir filtros por documento, período e tags.
 
 ## Aula 11: OCR para PDFs digitalizados
 
@@ -368,3 +366,28 @@ Antes do agente, um modelo pequeno (`GUARD_MODEL`, por defeito Haiku) classifica
 - O guarda vê as últimas trocas, para perceber seguimentos ("e em percentagem?") e para bloquear a continuação de conversas fora do âmbito.
 - Se o guarda falhar, o pedido é permitido (fail-open) e fica um aviso nos logs. O âmbito no prompt do agente é a segunda linha de defesa: em pedidos mistos responde só à parte do âmbito, e ignora instruções que apareçam dentro dos documentos.
 - `GUARD_ENABLED=false` desativa o guarda.
+
+## Aula 13: Revisão do texto antes de indexar
+
+A indexação passou a ter duas fases, com uma validação entre elas:
+
+1. **Extração** (`POST /documents/upload`, `POST /documents/{id}/reindex`): pypdf + OCR. O texto de cada página fica em `backend/storage/extractions/{id}.json` e o documento fica `pending_review`, fora do Chroma e do índice de palavras-chave.
+2. **Validação automática** (`backend/services/extraction_review.py`): cada página recebe alertas:
+   - `empty`: sem texto;
+   - `short`: menos de `OCR_MIN_TEXT_CHARS` caracteres;
+   - `low_confidence`: OCR com confiança abaixo de `OCR_MIN_CONFIDENCE`;
+   - `garbled`: mais de `REVIEW_MAX_GARBLED_RATIO` das palavras parecem mal lidas (símbolos no meio, letras sem vogais);
+   - `encoding`: `�`, mojibake (`Ã©`) ou glifos `(cid:N)`.
+3. **Revisão humana** (botão **Rever** no frontend): editar o texto de uma página, excluí-la, ou repetir o OCR com outro DPI.
+4. **Aprovação** (`POST /documents/{id}/approve`): chunks, embeddings e indexação do texto revisto. Os chunks levam `extraction` (`text`, `ocr`, `manual`) e `edited` nos metadados.
+
+Com `AUTO_APPROVE_CLEAN_DOCUMENTS=true`, os documentos sem alertas saltam o passo 3 e são indexados logo. Os que têm alertas ficam sempre à espera de revisão. Por defeito está `false`: todos os documentos passam pela revisão.
+
+| Endpoint | Descrição |
+|---|---|
+| `GET /documents/{id}/extraction` | Texto, origem, confiança e alertas por página |
+| `PUT /documents/{id}/pages/{n}` | `{"text": "..."}` e/ou `{"excluded": true}` |
+| `POST /documents/{id}/pages/{n}/ocr` | `{"dpi": 400}` repete o OCR da página |
+| `POST /documents/{id}/approve` | Indexa o texto revisto |
+
+Só se edita um documento `pending_review`. Para rever um documento já indexado, usar reindex: volta a extrair do zero (as edições manuais perdem-se) e o documento sai do índice até nova aprovação. Documentos indexados antes desta fase não têm extração guardada; aparecem como indexados e precisam de reindex para serem revistos.

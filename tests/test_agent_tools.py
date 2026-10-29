@@ -21,7 +21,7 @@ class _FakeVectorStore:
 class _FakeRegistry:
     def find_by_id(self, document_id):
         if document_id == "doc-1":
-            return SimpleNamespace(document_id="doc-1", filename="contrato.pdf", chunk_count=3)
+            return SimpleNamespace(document_id="doc-1", filename="contrato.pdf", chunk_count=3, status="indexed")
         return None
 
     def list_documents(self):

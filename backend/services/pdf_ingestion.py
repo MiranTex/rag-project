@@ -44,6 +44,10 @@ def save_uploaded_file(upload_dir: str, filename: str, content: bytes) -> Path:
     return target
 
 
+def count_pages(pdf_path: Path) -> int:
+    return len(PdfReader(str(pdf_path)).pages)
+
+
 def extract_pages(
     pdf_path: Path,
     ocr_languages: str | None = None,

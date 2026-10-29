@@ -17,7 +17,8 @@ class ListDocumentsParams(BaseModel):
     params=ListDocumentsParams,
 )
 def list_documents(params: ListDocumentsParams, ctx: ToolContext) -> ToolResult:
-    docs = ctx.registry.list_documents()
+    # Documentos à espera de revisão ainda não estão no índice.
+    docs = [d for d in ctx.registry.list_documents() if d.status == "indexed"]
     content = [
         {"document_id": d.document_id, "filename": d.filename, "chunk_count": d.chunk_count}
         for d in docs
