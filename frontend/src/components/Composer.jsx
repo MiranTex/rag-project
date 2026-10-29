@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ArrowUp, ChevronDown, FileText, Layers, Loader2, UserCog } from "lucide-react";
+import { ArrowUp, ChevronDown, FileText, Layers, Square, UserCog } from "lucide-react";
 
 const MAX_TEXTAREA_HEIGHT = 200;
 
@@ -50,6 +50,7 @@ export default function Composer({
   question,
   onQuestionChange,
   onAsk,
+  onStop,
   asking,
   mode,
   onModeChange,
@@ -78,6 +79,11 @@ export default function Composer({
   const canSend = question.trim().length > 0 && !asking;
 
   function handleKeyDown(event) {
+    if (event.key === "Escape" && asking) {
+      event.preventDefault();
+      onStop();
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       if (canSend) onAsk();
@@ -141,15 +147,27 @@ export default function Composer({
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={onAsk}
-          disabled={!canSend}
-          aria-label="Enviar"
-          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-500 text-white transition-colors hover:bg-accent-600 disabled:bg-stone-200 disabled:text-stone-400"
-        >
-          {asking ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" strokeWidth={2.5} />}
-        </button>
+        {asking ? (
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label="Parar resposta"
+            title="Parar (Esc)"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-stone-900 text-white transition-colors hover:bg-stone-700"
+          >
+            <Square className="size-3" fill="currentColor" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onAsk}
+            disabled={!canSend}
+            aria-label="Enviar"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-500 text-white transition-colors hover:bg-accent-600 disabled:bg-stone-200 disabled:text-stone-400"
+          >
+            <ArrowUp className="size-4" strokeWidth={2.5} />
+          </button>
+        )}
       </div>
     </div>
   );

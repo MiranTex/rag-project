@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, X } from "lucide-react";
 import {
   askAgentStream,
@@ -16,6 +16,18 @@ import Sidebar from "./components/Sidebar";
 
 const CHAT_STORAGE_KEY = "rag-study-chat-history";
 const AGENT_HISTORY_TURNS = 6;
+
+function isAbort(err) {
+  return err?.name === "AbortError";
+}
+
+// Mensagem interrompida pelo utilizador: fica o que já chegou e os passos a meio deixam de aparecer "a correr".
+function markStopped(msg) {
+  return {
+    stopped: true,
+    steps: msg.steps?.map((step) => (step.status === "running" ? { ...step, status: "stopped" } : step)),
+  };
+}
 
 function Notice({ notice, onDismiss }) {
   useEffect(() => {
@@ -57,6 +69,7 @@ export default function App() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [asking, setAsking] = useState(false);
+  const abortRef = useRef(null);
   const [multiQuery, setMultiQuery] = useState(false);
   const [mode, setMode] = useState("agent");
   const [profiles, setProfiles] = useState([]);
@@ -113,10 +126,10 @@ export default function App() {
     setMessages((prev) => prev.map((msg) => (msg.id === id ? { ...msg, ...update(msg) } : msg)));
   }
 
-  async function handleAskAgent(cleanQuestion) {
+  async function handleAskAgent(cleanQuestion, signal) {
     const pendingIndex = Date.now();
     const history = messages
-      .filter((msg) => msg.answer && !msg.answer.startsWith("Erro:"))
+      .filter((msg) => msg.answer && !msg.stopped && !msg.answer.startsWith("Erro:"))
       .slice(-AGENT_HISTORY_TURNS)
       .map((msg) => ({ question: msg.question, answer: msg.answer }));
 
@@ -167,10 +180,14 @@ export default function App() {
             updateMessage(pendingIndex, () => ({ answer: data.answer, blocked: !!data.blocked }));
           }
         },
+        signal,
       );
-      setQuestion("");
     } catch (err) {
-      updateMessage(pendingIndex, () => ({ answer: `Erro: ${err.message}` }));
+      if (isAbort(err)) {
+        updateMessage(pendingIndex, markStopped);
+      } else {
+        updateMessage(pendingIndex, () => ({ answer: `Erro: ${err.message}` }));
+      }
     }
   }
 
@@ -198,13 +215,19 @@ export default function App() {
 
   async function handleAsk() {
     const cleanQuestion = question.trim();
-    if (!cleanQuestion) {
+    if (!cleanQuestion || asking) {
       return;
     }
 
+    // Como nos chats comuns: a pergunta sai logo da caixa e passa para a conversa.
+    setQuestion("");
     setAsking(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     if (mode === "agent") {
-      await handleAskAgent(cleanQuestion);
+      await handleAskAgent(cleanQuestion, controller.signal);
+      abortRef.current = null;
       setAsking(false);
       return;
     }
@@ -284,9 +307,13 @@ export default function App() {
             );
           },
         },
+        controller.signal,
       );
-      setQuestion("");
     } catch (err) {
+      if (isAbort(err)) {
+        updateMessage(pendingIndex, markStopped);
+        return;
+      }
       setMessages((prev) => [
         ...prev.map((msg) =>
           msg.id === pendingIndex
@@ -300,8 +327,13 @@ export default function App() {
         ),
       ]);
     } finally {
+      abortRef.current = null;
       setAsking(false);
     }
+  }
+
+  function handleStop() {
+    abortRef.current?.abort();
   }
 
   async function handleReindex(documentId) {
@@ -344,6 +376,7 @@ export default function App() {
   }
 
   function handleClearChat() {
+    handleStop();
     setMessages([]);
     localStorage.removeItem(CHAT_STORAGE_KEY);
   }
@@ -401,6 +434,7 @@ export default function App() {
         question={question}
         onQuestionChange={setQuestion}
         onAsk={handleAsk}
+        onStop={handleStop}
         mode={mode}
         onModeChange={setMode}
         profiles={profiles}

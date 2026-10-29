@@ -133,7 +133,7 @@ export default function Message({ msg, pending }) {
       </div>
 
       <div className="group">
-        {isAgent && <AgentSteps steps={msg.steps} done={done} />}
+        {isAgent && <AgentSteps steps={msg.steps} done={done} stopped={msg.stopped} />}
 
         {isError ? (
           <p className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -149,6 +149,10 @@ export default function Message({ msg, pending }) {
         ) : null}
 
         {isAgent && <ExportLinks exports={msg.exports} />}
+
+        {msg.stopped && !(isAgent && msg.steps?.length && !msg.answer) && (
+          <p className="mt-2 text-sm text-stone-400">Resposta interrompida.</p>
+        )}
 
         {msg.answer && !isError && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">

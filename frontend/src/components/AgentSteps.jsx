@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Ban, Check, ChevronRight, FilePlus2, Loader2, ShieldCheck, X } from "lucide-react";
+import { Ban, Check, ChevronRight, FilePlus2, Loader2, ShieldCheck, Square, X } from "lucide-react";
 
 const TOOL_LABELS = {
   list_documents: "Listar documentos",
@@ -50,6 +50,7 @@ function describeArguments(name, args = {}) {
 
 function StepIcon({ status }) {
   if (status === "running") return <Loader2 className="size-3.5 animate-spin text-stone-500" />;
+  if (status === "stopped") return <Square className="size-3 text-stone-400" fill="currentColor" />;
   if (status === "error") return <X className="size-3.5 text-red-600" />;
   return <Check className="size-3.5 text-emerald-600" />;
 }
@@ -63,7 +64,7 @@ function currentActivity(steps) {
   return "A pensar";
 }
 
-export default function AgentSteps({ steps, done }) {
+export default function AgentSteps({ steps, done, stopped }) {
   const [open, setOpen] = useState(false);
   if (!steps?.length) return null;
 
@@ -73,6 +74,7 @@ export default function AgentSteps({ steps, done }) {
 
   let summary;
   if (!done) summary = `${currentActivity(steps)}…`;
+  else if (stopped) summary = tools.length ? `Interrompido depois de ${tools.length} ferramenta${tools.length > 1 ? "s" : ""}` : "Interrompido";
   else if (blocked) summary = "Pedido fora do âmbito";
   else if (tools.length === 0) summary = "Respondeu sem usar ferramentas";
   else summary = `Usou ${tools.length} ferramenta${tools.length > 1 ? "s" : ""}${failed ? ` · ${failed} com erro` : ""}`;

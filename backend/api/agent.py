@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from backend.agent.profiles import BLOCKED_MESSAGE, DEFAULT_PROFILE, PROFILES, AgentProfile
 from backend.agent.runner import AgentRunner
 from backend.agent.tools import ToolContext
-from backend.api.sse import sse_event
+from backend.api.sse import sse_event, stop_on_disconnect
 from backend.config import get_settings
 from backend.dependencies import (
     get_export_store,
@@ -114,4 +114,7 @@ def ask_agent_stream(payload: AgentAskRequest) -> StreamingResponse:
         except Exception as exc:
             yield sse_event("error", {"detail": str(exc)})
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        stop_on_disconnect(stream(), f"Run do agente ({question[:60]})"),
+        media_type="text/event-stream",
+    )

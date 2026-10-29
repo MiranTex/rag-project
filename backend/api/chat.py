@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from backend.api.sse import sse_event
+from backend.api.sse import sse_event, stop_on_disconnect
 from backend.config import get_settings
 from backend.dependencies import get_rag_pipeline
 from backend.models import AskRequest, AskResponse
@@ -121,4 +121,7 @@ def ask_question_stream(payload: AskRequest) -> StreamingResponse:
         except Exception as exc:
             yield sse_event("error", {"detail": str(exc)})
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        stop_on_disconnect(stream(), f"Resposta RAG ({question[:60]})"),
+        media_type="text/event-stream",
+    )

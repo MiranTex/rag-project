@@ -126,11 +126,13 @@ export async function askQuestion(payload) {
   return data;
 }
 
-async function streamEvents(path, payload, onEvent) {
+// `signal` (AbortController) cancela o pedido; o backend deixa de correr passos quando a ligação fecha.
+async function streamEvents(path, payload, onEvent, signal) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
 
   if (!res.ok) {
@@ -177,7 +179,7 @@ async function streamEvents(path, payload, onEvent) {
   }
 }
 
-export async function askQuestionStream(payload, handlers) {
+export async function askQuestionStream(payload, handlers, signal) {
   await streamEvents("/chat/ask-stream", payload, (evt) => {
     if (evt.event === "sources" && handlers?.onSources) {
       handlers.onSources(evt.data.sources || []);
@@ -194,12 +196,12 @@ export async function askQuestionStream(payload, handlers) {
     if (evt.event === "done" && handlers?.onDone) {
       handlers.onDone(evt.data.answer || "");
     }
-  });
+  }, signal);
 }
 
 // Eventos: thinking, tool_call, tool_result, export, sources, answer, done.
-export async function askAgentStream(payload, onEvent) {
-  await streamEvents("/agent/ask-stream", payload, onEvent);
+export async function askAgentStream(payload, onEvent, signal) {
+  await streamEvents("/agent/ask-stream", payload, onEvent, signal);
 }
 
 export async function getAgentProfiles() {
