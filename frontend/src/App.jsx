@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { AlertCircle, CheckCircle2, X } from "lucide-react";
 import {
   askAgentStream,
   askQuestionStream,
@@ -10,18 +11,48 @@ import {
   uploadDocument,
 } from "./api";
 import ChatPanel from "./components/ChatPanel";
-import UploadPanel from "./components/UploadPanel";
+import ReviewPanel from "./components/ReviewPanel";
+import Sidebar from "./components/Sidebar";
 
 const CHAT_STORAGE_KEY = "rag-study-chat-history";
 const AGENT_HISTORY_TURNS = 6;
 
+function Notice({ notice, onDismiss }) {
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = setTimeout(onDismiss, notice.tone === "error" ? 8000 : 4000);
+    return () => clearTimeout(timer);
+  }, [notice, onDismiss]);
+
+  if (!notice) return null;
+  const isError = notice.tone === "error";
+  const Icon = isError ? AlertCircle : CheckCircle2;
+  return (
+    <div className="pointer-events-none fixed inset-x-0 top-3 z-[60] flex justify-center px-4">
+      <div
+        role="status"
+        className={`animate-fade-up pointer-events-auto flex max-w-md items-start gap-2.5 rounded-xl border bg-white px-4 py-3 text-sm shadow-lg ${
+          isError ? "border-red-200 text-red-800" : "border-stone-200 text-stone-800"
+        }`}
+      >
+        <Icon className={`mt-0.5 size-4 shrink-0 ${isError ? "text-red-600" : "text-emerald-600"}`} />
+        <span>{notice.text}</span>
+        <button type="button" onClick={onDismiss} aria-label="Fechar aviso" className="text-stone-400 hover:text-stone-700">
+          <X className="size-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [health, setHealth] = useState(null);
   const [documents, setDocuments] = useState([]);
-  const [selectedFile, setSelectedFile] = useState(null);
   const [selectedDocument, setSelectedDocument] = useState("");
-  const [uploadStatus, setUploadStatus] = useState("");
-  const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [uploadingName, setUploadingName] = useState("");
+  const [reviewingDocument, setReviewingDocument] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
@@ -50,15 +81,25 @@ export default function App() {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
   }, [messages]);
 
+  const dismissNotice = useCallback(() => setNotice(null), []);
+
+  function notify(text, tone = "ok") {
+    setNotice({ text, tone, at: Date.now() });
+  }
+
   async function refreshData() {
-    const [healthData, docsData] = await Promise.all([getHealth(), getDocuments()]);
+    const [healthData, docsData] = await Promise.all([
+      getHealth().catch(() => ({ offline: true })),
+      getDocuments(),
+    ]);
     setHealth(healthData);
     setDocuments(docsData);
   }
 
   useEffect(() => {
-    refreshData().catch((err) => {
-      setUploadStatus(`Erro inicial: ${err.message}`);
+    refreshData().catch(() => {
+      setHealth({ offline: true });
+      notify("Não foi possível ligar à API. Confirma que o backend está a correr.", "error");
     });
     getAgentProfiles()
       .then((data) => {
@@ -133,23 +174,25 @@ export default function App() {
     }
   }
 
-  async function handleUpload() {
-    if (!selectedFile) {
-      setUploadStatus("Escolhe um PDF antes de carregar.");
+  async function handleUpload(file) {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      notify("Só são aceites ficheiros PDF.", "error");
       return;
     }
 
-    setUploading(true);
-    setUploadStatus("A processar e indexar documento...");
+    setUploadingName(file.name);
     try {
-      const result = await uploadDocument(selectedFile, false);
-      setUploadStatus(result.message);
-      setSelectedFile(null);
+      const result = await uploadDocument(file, false);
+      notify(result.message);
       await refreshData();
+      if (result.document.status === "pending_review") {
+        setSidebarOpen(false);
+        setReviewingDocument(result.document.document_id);
+      }
     } catch (err) {
-      setUploadStatus(`Erro no upload: ${err.message}`);
+      notify(`Não foi possível carregar ${file.name}: ${err.message}`, "error");
     } finally {
-      setUploading(false);
+      setUploadingName("");
     }
   }
 
@@ -262,28 +305,42 @@ export default function App() {
   }
 
   async function handleReindex(documentId) {
-    setUploadStatus("A reindexar documento...");
+    const doc = documents.find((d) => d.document_id === documentId);
+    setUploadingName(doc?.filename || "Documento");
     try {
       const result = await reindexDocument(documentId);
-      setUploadStatus(result.message);
+      notify(result.message);
       await refreshData();
+      if (result.document.status === "pending_review") {
+        setSidebarOpen(false);
+        setReviewingDocument(documentId);
+      }
     } catch (err) {
-      setUploadStatus(`Erro na reindexação: ${err.message}`);
+      notify(`Não foi possível extrair de novo: ${err.message}`, "error");
+    } finally {
+      setUploadingName("");
     }
   }
 
   async function handleDelete(documentId) {
-    setUploadStatus("A remover documento...");
     try {
       const result = await deleteDocument(documentId);
       if (selectedDocument === documentId) {
         setSelectedDocument("");
       }
-      setUploadStatus(result.message);
+      notify(result.message);
       await refreshData();
     } catch (err) {
-      setUploadStatus(`Erro ao remover: ${err.message}`);
+      notify(`Não foi possível remover: ${err.message}`, "error");
     }
+  }
+
+  async function handleReviewClosed(message) {
+    setReviewingDocument(null);
+    if (message) {
+      notify(message);
+    }
+    await refreshData().catch(() => {});
   }
 
   function handleClearChat() {
@@ -308,51 +365,60 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  const indexedDocuments = documents.filter((d) => d.status === "indexed");
+
   return (
-    <main className="app-shell">
-      <header className="hero">
-        <p className="eyebrow">RAG Study Lab</p>
-        <h1>PDF para conhecimento pesquisável</h1>
-        <p>
-          Carrega documentos, indexa no Chroma e pergunta ao assistente, ou deixa o
-          agente pesquisar, calcular e exportar resultados.
-        </p>
-        <div className="health-badge">
-          API: {health?.status || "..."} | LLM: {String(health?.lmstudio)} |
-          Chroma: {String(health?.chroma)}
-        </div>
-      </header>
+    <div className="flex h-full overflow-hidden">
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        documents={documents}
+        uploadingName={uploadingName}
+        onUpload={handleUpload}
+        onReview={(id) => {
+          setSidebarOpen(false);
+          setReviewingDocument(id);
+        }}
+        onReindex={handleReindex}
+        onDelete={handleDelete}
+        onNewChat={() => {
+          handleClearChat();
+          setSidebarOpen(false);
+        }}
+        health={health}
+      />
 
-      <section className="grid">
-        <UploadPanel
-          documents={documents}
-          selectedDocument={selectedDocument}
-          onSelectDocument={setSelectedDocument}
-          uploadStatus={uploadStatus}
-          onFileChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-          onUpload={handleUpload}
-          onReindex={handleReindex}
-          onDelete={handleDelete}
-          loading={uploading}
-        />
+      <ChatPanel
+        messages={messages}
+        asking={asking}
+        onClear={handleClearChat}
+        onExport={handleExportChat}
+        onOpenSidebar={() => setSidebarOpen(true)}
+        documents={indexedDocuments}
+        pendingCount={documents.length - indexedDocuments.length}
+        selectedDocument={selectedDocument}
+        onSelectDocument={setSelectedDocument}
+        question={question}
+        onQuestionChange={setQuestion}
+        onAsk={handleAsk}
+        mode={mode}
+        onModeChange={setMode}
+        profiles={profiles}
+        profile={profile}
+        onProfileChange={setProfile}
+        multiQuery={multiQuery}
+        onMultiQueryChange={setMultiQuery}
+      />
 
-        <ChatPanel
-          question={question}
-          onQuestionChange={setQuestion}
-          onAsk={handleAsk}
-          onClear={handleClearChat}
-          onExport={handleExportChat}
-          asking={asking}
-          messages={messages}
-          multiQuery={multiQuery}
-          onMultiQueryChange={setMultiQuery}
-          mode={mode}
-          onModeChange={setMode}
-          profiles={profiles}
-          profile={profile}
-          onProfileChange={setProfile}
+      {reviewingDocument && (
+        <ReviewPanel
+          documentId={reviewingDocument}
+          onClose={() => handleReviewClosed()}
+          onApproved={handleReviewClosed}
         />
-      </section>
-    </main>
+      )}
+
+      <Notice notice={notice} onDismiss={dismissNotice} />
+    </div>
   );
 }

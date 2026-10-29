@@ -1,215 +1,142 @@
 import { useEffect, useRef, useState } from "react";
-import AgentSteps from "./AgentSteps";
-import ExportLinks from "./ExportLinks";
-import Markdown from "./Markdown";
+import { Download, Menu, Trash2 } from "lucide-react";
+import Composer from "./Composer";
+import Message from "./Message";
+
+function EmptyState({ documentCount, pendingCount }) {
+  if (documentCount === 0) {
+    return (
+      <div className="text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">Ainda não há documentos</h1>
+        <p className="mt-2 text-stone-500">
+          {pendingCount > 0
+            ? `Tens ${pendingCount} documento${pendingCount > 1 ? "s" : ""} à espera de revisão na barra lateral.`
+            : "Adiciona um PDF na barra lateral. Depois de rever o texto, podes fazer perguntas sobre ele."}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="text-center">
+      <h1 className="text-2xl font-semibold tracking-tight">O que queres saber?</h1>
+      <p className="mt-2 text-stone-500">
+        As respostas vêm de {documentCount === 1 ? "1 documento indexado" : `${documentCount} documentos indexados`}, com
+        a página de onde saiu cada informação.
+      </p>
+    </div>
+  );
+}
 
 export default function ChatPanel({
-  question,
-  onQuestionChange,
-  onAsk,
+  messages,
+  asking,
   onClear,
   onExport,
-  asking,
-  messages,
-  multiQuery,
-  onMultiQueryChange,
-  mode,
-  onModeChange,
-  profiles,
-  profile,
-  onProfileChange,
+  onOpenSidebar,
+  documents,
+  pendingCount,
+  selectedDocument,
+  ...composerProps
 }) {
   const streamRef = useRef(null);
-  const [expandedById, setExpandedById] = useState({});
+  const [confirmClear, setConfirmClear] = useState(false);
+  const scope = documents.find((d) => d.document_id === selectedDocument);
 
   useEffect(() => {
-    const streamEl = streamRef.current;
-    if (!streamEl) return;
-    streamEl.scrollTop = streamEl.scrollHeight;
+    const el = streamRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  function handleKeyDown(event) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      onAsk();
-    }
-  }
+  useEffect(() => {
+    if (!confirmClear) return undefined;
+    const timer = setTimeout(() => setConfirmClear(false), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmClear]);
 
-  function toggleContext(messageId) {
-    setExpandedById((prev) => ({
-      ...prev,
-      [messageId]: !prev[messageId],
-    }));
-  }
+  const empty = messages.length === 0;
+  const composer = (
+    <Composer asking={asking} documents={documents} selectedDocument={selectedDocument} {...composerProps} />
+  );
 
   return (
-    <section className="panel chat-panel">
-      <div className="chat-header-row">
-        <div>
-          <h2>Chat</h2>
-          <p className="muted">
-            {mode === "agent"
-              ? "O agente pesquisa, calcula e pode exportar CSV ou documentos."
-              : "Pergunta de um lado, resposta do outro, como num chat convencional."}
-          </p>
-        </div>
-        <div className="chat-toolbar">
-          <div className="mode-switch" role="group" aria-label="Modo">
-            <button
-              type="button"
-              className={mode === "rag" ? "active" : ""}
-              onClick={() => onModeChange("rag")}
-              title="Pergunta direta ao RAG"
-            >
-              RAG
-            </button>
-            <button
-              type="button"
-              className={mode === "agent" ? "active" : ""}
-              onClick={() => onModeChange("agent")}
-              title="Agente com tools"
-            >
-              Agente
-            </button>
-          </div>
-          {mode === "agent" ? (
-            <select
-              className="profile-select"
-              value={profile}
-              onChange={(e) => onProfileChange(e.target.value)}
-              title={profiles.find((p) => p.name === profile)?.description}
-            >
-              {profiles.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+    <main className="flex h-full min-w-0 flex-1 flex-col bg-white">
+      <header className="flex h-14 shrink-0 items-center gap-2 px-3 md:px-5">
+        <button
+          type="button"
+          onClick={onOpenSidebar}
+          aria-label="Abrir documentos"
+          className="rounded-md p-1.5 text-stone-600 hover:bg-stone-100 md:hidden"
+        >
+          <Menu className="size-5" />
+        </button>
+        <p className="min-w-0 truncate text-sm text-stone-500">
+          {scope ? (
+            <>
+              A pesquisar em <span className="font-medium text-stone-800">{scope.filename}</span>
+            </>
           ) : (
-            <label className="multi-query-toggle" title="Expande a pergunta em variantes antes de fazer retrieval">
-              <input
-                type="checkbox"
-                checked={multiQuery}
-                onChange={(e) => onMultiQueryChange(e.target.checked)}
-              />
-              Multi-Query
-            </label>
+            "A pesquisar em todos os documentos"
           )}
-          <button type="button" onClick={onExport} disabled={messages.length === 0}>
-            Exportar historico
-          </button>
-          <button type="button" onClick={onClear} disabled={messages.length === 0}>
-            Limpar historico
-          </button>
-        </div>
-      </div>
-
-      <div className="chat-stream" ref={streamRef}>
-        {messages.length === 0 && (
-          <div className="empty-chat-state">
-            <p>Sem mensagens ainda. Faz a primeira pergunta.</p>
+        </p>
+        {!empty && (
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onExport}
+              title="Exportar conversa (JSON)"
+              aria-label="Exportar conversa"
+              className="rounded-md p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-800"
+            >
+              <Download className="size-[18px]" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirmClear) {
+                  setConfirmClear(false);
+                  onClear();
+                } else {
+                  setConfirmClear(true);
+                }
+              }}
+              aria-label="Apagar conversa"
+              className={`flex items-center gap-1.5 rounded-md p-1.5 text-sm ${
+                confirmClear ? "bg-red-50 px-2.5 text-red-700" : "text-stone-500 hover:bg-stone-100 hover:text-stone-800"
+              }`}
+            >
+              <Trash2 className="size-[18px]" />
+              {confirmClear && "Apagar conversa?"}
+            </button>
           </div>
         )}
+      </header>
 
-        {messages.map((msg) => {
-          const hasContext = (msg.sources && msg.sources.length > 0)
-            || (msg.retrievalDiagnostics && msg.retrievalDiagnostics.length > 0)
-            || (msg.expandedQueries && msg.expandedQueries.length > 0);
-          const isExpanded = !!expandedById[msg.id];
-          const isAgent = msg.mode === "agent";
-
-          return (
-            <article key={msg.id} className="chat-turn">
-              <div className="bubble bubble-user">
-                <p className="bubble-label">Utilizador</p>
-                <p>{msg.question}</p>
-              </div>
-
-              <div className={`bubble bubble-assistant${msg.blocked ? " bubble-blocked" : ""}`}>
-                <p className="bubble-label">{isAgent ? "Agente" : "Assistente"}</p>
-                {isAgent && <AgentSteps steps={msg.steps} />}
-                {isAgent && msg.answer ? (
-                  <Markdown>{msg.answer}</Markdown>
-                ) : (
-                  <p>{msg.answer || (asking ? (isAgent ? "A trabalhar..." : "A responder...") : "")}</p>
-                )}
-                {isAgent && <ExportLinks exports={msg.exports} />}
-
-                {hasContext && (
-                  <button
-                    type="button"
-                    className="context-toggle"
-                    onClick={() => toggleContext(msg.id)}
-                  >
-                    {isExpanded
-                      ? `Ocultar fontes${isAgent ? "" : " e diagnostico"}`
-                      : `Mostrar fontes${isAgent ? "" : " e diagnostico"}`}
-                  </button>
-                )}
-
-                {isExpanded && (
-                  <div className="context-box">
-                    {msg.expandedQueries?.length > 0 && (
-                      <>
-                        <h3>Queries expandidas ({msg.expandedQueries.length})</h3>
-                        <ol className="expanded-queries-list">
-                          {msg.expandedQueries.map((q, i) => (
-                            <li key={`${msg.id}-eq-${i}`}>{q}</li>
-                          ))}
-                        </ol>
-                      </>
-                    )}
-                    <h3>Fontes</h3>
-                    {msg.sources?.length ? (
-                      <ul>
-                        {msg.sources.map((source, i) => (
-                          <li key={`${msg.id}-src-${i}`}>
-                            {source.filename} | pag. {source.page}
-                            {typeof source.score === "number" && ` | score ${source.score.toFixed(3)}`}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p>Sem fontes devolvidas.</p>
-                    )}
-
-                    {!isAgent && <h3>Diagnostico do ranking</h3>}
-                    {isAgent ? null : msg.retrievalDiagnostics?.length ? (
-                      <ul className="diag-list">
-                        {msg.retrievalDiagnostics.map((diag, i) => (
-                          <li key={`${msg.id}-diag-${i}`}>
-                            <strong>
-                              {diag.filename} | pag. {diag.page} | chunk {diag.chunk_index}
-                            </strong>
-                            <span>
-                              final {diag.final_score.toFixed(3)} = vec {diag.vector_score.toFixed(3)} + kw {diag.keyword_overlap.toFixed(3)} + pos {diag.position_penalty.toFixed(3)} + dens {diag.density_score.toFixed(3)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p>Sem diagnostico devolvido.</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </article>
-          );
-        })}
-      </div>
-
-      <div className="chat-composer">
-        <textarea
-          rows={3}
-          value={question}
-          onChange={(e) => onQuestionChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Escreve a tua pergunta... (Enter para enviar, Shift+Enter para nova linha)"
-        />
-        <button onClick={onAsk} disabled={asking}>
-          {asking ? "A responder..." : "Perguntar"}
-        </button>
-      </div>
-    </section>
+      {empty ? (
+        <div className="flex flex-1 flex-col items-center justify-center px-4 pb-[12vh]">
+          <div className="w-full max-w-2xl space-y-6">
+            <EmptyState documentCount={documents.length} pendingCount={pendingCount} />
+            {composer}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div ref={streamRef} className="flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-3xl space-y-10 px-4 py-6">
+              {messages.map((msg, i) => (
+                <Message key={msg.id} msg={msg} pending={asking && i === messages.length - 1} />
+              ))}
+            </div>
+          </div>
+          <div className="shrink-0 px-4 pb-4">
+            <div className="mx-auto max-w-3xl">
+              {composer}
+              <p className="mt-2 text-center text-xs text-stone-400">
+                As respostas podem ter erros. Confirma na página indicada.
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+    </main>
   );
 }

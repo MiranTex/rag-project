@@ -77,6 +77,44 @@ export async function reindexDocument(documentId) {
   return data;
 }
 
+export async function getExtraction(documentId) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/extraction`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao carregar extração");
+  return data;
+}
+
+export async function updatePage(documentId, page, changes) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/pages/${page}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao guardar página");
+  return data;
+}
+
+export async function rerunPageOcr(documentId, page, dpi = null) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/pages/${page}/ocr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dpi }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao repetir OCR");
+  return data;
+}
+
+export async function approveDocument(documentId) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/approve`, {
+    method: "POST",
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao aprovar documento");
+  return data;
+}
+
 export async function askQuestion(payload) {
   const res = await fetch(`${API_BASE}/chat/ask`, {
     method: "POST",
