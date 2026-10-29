@@ -52,10 +52,19 @@ class _FakePipeline:
         self.calls = []
 
     def retrieve_sources(self, question, top_k, filters=None, **kwargs):
-        self.calls.append(filters)
+        self.calls.append((question, filters))
+        document_id = filters.document_id if filters and filters.document_id else "a"
         return [
-            SourceChunk(document_id="a", filename="a.pdf", page=9, chunk_index=3, score=0.8, text="Integrar…", section="future_work")
-        ]
+            SourceChunk(
+                document_id=document_id,
+                filename=f"{document_id}.pdf",
+                page=9,
+                chunk_index=3,
+                score=0.8,
+                text=f"{question} em {document_id}…",
+                section="future_work" if document_id == "a" else None,
+            )
+        ][:top_k]
 
 
 class _FakeVectorStore:
@@ -85,6 +94,7 @@ class _FakeRegistry:
     def __init__(self):
         self.docs = {
             "a": SimpleNamespace(document_id="a", filename="a.pdf", chunk_count=3, status="indexed"),
+            "b": SimpleNamespace(document_id="b", filename="b.pdf", chunk_count=1, status="indexed"),
             "p": SimpleNamespace(document_id="p", filename="p.pdf", chunk_count=0, status="pending_review"),
         }
 
@@ -115,6 +125,8 @@ def ctx(tmp_path):
         {"text": "Conclui-se…", "metadata": _meta("a", 2, "conclusion", 9)},
         {"text": "Integrar…", "metadata": _meta("a", 3, "future_work", 9)},
         {"text": "Mais conclusões…", "metadata": _meta("a", 4, "conclusion", 10)},
+        {"text": "Limitação: amostra pequena.", "metadata": _meta("a", 5, "limitations", 10)},
+        {"text": "Relatório sem secções.", "metadata": _meta("b", 0, None, 1)},
     ]
     return ToolContext(
         pipeline=_FakePipeline(),
@@ -145,7 +157,8 @@ def test_list_documents_shows_profile_and_available_filters(ctx):
             "year": 2024,
             # Só os campos filtráveis; orientadores ficam de fora.
             "course": "Engenharia Informática",
-        }
+        },
+        {"document_id": "b", "filename": "b.pdf", "chunk_count": 1},
     ]
     academic = content["document_types"]["academic"]
     assert "future_work" in academic["sections"] and "chapter" in academic["sections"]
@@ -155,7 +168,7 @@ def test_list_documents_shows_profile_and_available_filters(ctx):
 def test_search_documents_passes_filters_and_reports_section(ctx):
     result = run(ctx, "search_documents", query="o que ficou por fazer", sections=["future_work"], year_from=2020)
 
-    filters = ctx.pipeline.calls[0]
+    _, filters = ctx.pipeline.calls[0]
     assert filters.sections == ["future_work"] and filters.year_from == 2020
     assert result.content[0]["section"] == "future_work"
 
@@ -191,6 +204,7 @@ def test_document_overview_lists_sections_with_pages(ctx):
         {"section": "introduction", "label": "Introdução", "pages": "4", "excerpts": 1},
         {"section": "conclusion", "label": "Conclusões", "pages": "9–10", "excerpts": 2},
         {"section": "future_work", "label": "Trabalho futuro", "pages": "9", "excerpts": 1},
+        {"section": "limitations", "label": "Limitações", "pages": "10", "excerpts": 1},
     ]
     with pytest.raises(ToolError):
         run(ctx, "get_document_overview", document_id="p")
@@ -209,3 +223,54 @@ def test_find_similar_documents_needs_query_or_document(ctx):
         run(ctx, "find_similar_documents")
     with pytest.raises(ToolError, match="sem ficha"):
         run(ctx, "find_similar_documents", document_id="zzz")
+
+
+def test_find_open_questions_collects_configured_sections(ctx):
+    result = run(ctx, "find_open_questions")
+
+    [doc] = result.content["documents"]
+    assert doc["title"] == "Recomendação de livros"
+    assert [(o["section"], o["pages"]) for o in doc["open"]] == [("Trabalho futuro", "9"), ("Limitações", "10")]
+    assert "amostra pequena" in doc["open"][1]["text"]
+    # Documentos sem essas secções ficam à parte (o agente pode ir às conclusões).
+    assert result.content["documents_without_open_sections"] == ["b.pdf"]
+    assert {(r.document_id, r.page) for r in result.sources} == {("a", 9), ("a", 10)}
+
+
+def test_find_open_questions_with_topic_searches_only_open_sections(ctx):
+    run(ctx, "find_open_questions", query="catálogos", document_type="academic", year_from=2020)
+
+    question, filters = ctx.pipeline.calls[0]
+    assert question == "catálogos"
+    assert sorted(filters.sections) == ["future_work", "limitations"]
+    assert filters.document_type == "academic" and filters.year_from == 2020
+
+
+def test_find_open_questions_rejects_types_without_open_sections(ctx):
+    with pytest.raises(ToolError, match="não tem secções"):
+        run(ctx, "find_open_questions", document_type="procedure")
+
+
+def test_compare_documents_builds_a_matrix_per_document_and_dimension(ctx):
+    result = run(ctx, "compare_documents", document_ids=["a", "b"], dimensions=["método", "resultados"], excerpts_per_cell=1)
+
+    rows = result.content["documents"]
+    assert [r["document_id"] for r in rows] == ["a", "b"]
+    assert rows[0]["fields"]["Curso"] == "Engenharia Informática"
+    assert rows[1]["cells"]["resultados"] == [{"page": 9, "text": "resultados em b…"}]
+    # Cada célula é uma pesquisa restringida a esse documento.
+    assert [(q, f.document_id) for q, f in ctx.pipeline.calls] == [
+        ("método", "a"),
+        ("resultados", "a"),
+        ("método", "b"),
+        ("resultados", "b"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "document_ids, message",
+    [(["a", "p"], "não indexados"), (["a", "zzz"], "não indexados"), (["a", "a"], "dois documentos diferentes")],
+)
+def test_compare_documents_validates_documents(ctx, document_ids, message):
+    with pytest.raises(ToolError, match=message):
+        run(ctx, "compare_documents", document_ids=document_ids, dimensions=["método"])

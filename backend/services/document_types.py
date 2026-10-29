@@ -41,6 +41,8 @@ class DocumentType:
     fields: tuple[FieldDef, ...] = ()
     sections: tuple[SectionDef, ...] = ()
     name_pattern: str = ""
+    # Secções onde fica o que está em aberto (trabalho futuro, limitações, recomendações).
+    open_sections: tuple[str, ...] = ()
 
     def field(self, key: str) -> FieldDef | None:
         return next((f for f in self.fields if f.key == key), None)
@@ -101,8 +103,12 @@ def parse_document_types(config: dict) -> DocumentTypes:
             raise ValueError(f"tipo {key!r}: {sorted(BUILTIN_LABELS)} são chaves reservadas")
         name_pattern = raw.get("name_pattern", "")
         _check_name_pattern(key, name_pattern, {f.key for f in fields})
+        open_sections = tuple(raw.get("open_sections", []))
+        unknown = set(open_sections) - {s.key for s in sections}
+        if unknown:
+            raise ValueError(f"tipo {key!r}: open_sections com secções que o tipo não tem: {sorted(unknown)}")
         types[key] = DocumentType(
-            key, raw.get("label", key), raw.get("description", ""), tuple(fields), tuple(sections), name_pattern
+            key, raw.get("label", key), raw.get("description", ""), tuple(fields), tuple(sections), name_pattern, open_sections
         )
 
     default = config.get("default") or next(iter(types))

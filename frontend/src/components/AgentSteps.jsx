@@ -7,6 +7,8 @@ const TOOL_LABELS = {
   read_document: "Ler documento",
   get_document_overview: "Ficha do documento",
   find_similar_documents: "Procurar documentos",
+  find_open_questions: "Pontos em aberto",
+  compare_documents: "Comparar documentos",
   calculate: "Calcular",
   percentage_change: "Variação %",
   date_difference: "Diferença de datas",
@@ -22,6 +24,8 @@ const TOOL_PROGRESS = {
   read_document: "A ler o documento",
   get_document_overview: "A ver a ficha do documento",
   find_similar_documents: "A procurar documentos sobre",
+  find_open_questions: "A juntar o que ficou em aberto",
+  compare_documents: "A comparar documentos",
   calculate: "A calcular",
   percentage_change: "A calcular a variação",
   date_difference: "A contar o tempo entre datas",
@@ -55,6 +59,8 @@ function describeArguments(name, args = {}) {
   if (name === "find_similar_documents") {
     return `${args.query ? `“${args.query}”` : "parecidos com um documento"}${describeFilters(args)}`;
   }
+  if (name === "find_open_questions") return `${args.query ? `“${args.query}”` : ""}${describeFilters(args)}`;
+  if (name === "compare_documents") return `${args.document_ids?.length || 0} documentos · ${(args.dimensions || []).join(", ")}`;
   if (name === "read_document") {
     if (args.section) return `secção ${args.section}`;
     if (args.page_start || args.page_end) return `p. ${args.page_start || 1}–${args.page_end || "fim"}`;

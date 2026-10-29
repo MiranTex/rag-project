@@ -1,3 +1,4 @@
+from backend.agent.tools.analysis import compare_documents, find_open_questions
 from backend.agent.tools.base import Tool, ToolContext, ToolError, ToolRegistry, ToolResult
 from backend.agent.tools.calculations import calculate, date_add, date_difference, percentage_change
 from backend.agent.tools.documents import (
@@ -16,6 +17,8 @@ ALL_TOOLS: list[Tool] = [
     read_document,
     get_document_overview,
     find_similar_documents,
+    find_open_questions,
+    compare_documents,
     calculate,
     percentage_change,
     date_difference,

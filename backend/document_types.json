@@ -1,5 +1,5 @@
 {
-  "_comment": "Tipos de documento desta base de conhecimento. Cada instituição adapta este ficheiro (ou aponta DOCUMENT_TYPES_FILE para outro). fields: campos próprios do tipo, além de título, autores, ano, palavras-chave e resumo, que todos têm. type: text | list | people (lista de nomes, sem títulos como Prof. ou Dr.). filterable: o campo vai para os metadados de cada excerto e pode filtrar pesquisas (só text). sections: títulos reconhecidos linha a linha (regex Python, sem maiúsculas/minúsculas, comparada com a linha inteira sem numeração). As chaves abstract e references ativam a extração do resumo e da bibliografia. name_pattern: nome do documento no sistema, ex.: \"{year} - {title}\"; campos: title, year, authors (primeiro autor), type, date (data de carregamento) e os campos do tipo; \"[...]\" é um grupo opcional que desaparece se algum campo lá dentro estiver vazio. Cada tipo pode ter o seu name_pattern.",
+  "_comment": "Tipos de documento desta base de conhecimento. Cada instituição adapta este ficheiro (ou aponta DOCUMENT_TYPES_FILE para outro). fields: campos próprios do tipo, além de título, autores, ano, palavras-chave e resumo, que todos têm. type: text | list | people (lista de nomes, sem títulos como Prof. ou Dr.). filterable: o campo vai para os metadados de cada excerto e pode filtrar pesquisas (só text). sections: títulos reconhecidos linha a linha (regex Python, sem maiúsculas/minúsculas, comparada com a linha inteira sem numeração). As chaves abstract e references ativam a extração do resumo e da bibliografia. name_pattern: nome do documento no sistema, ex.: \"{year} - {title}\"; campos: title, year, authors (primeiro autor), type, date (data de carregamento) e os campos do tipo; \"[...]\" é um grupo opcional que desaparece se algum campo lá dentro estiver vazio. Cada tipo pode ter o seu name_pattern. open_sections: secções onde fica o que está em aberto (trabalho futuro, limitações, recomendações), lidas por find_open_questions.",
   "default": "generic",
   "name_pattern": "{year} - {title}",
   "types": {
@@ -43,9 +43,17 @@
           "patterns": [
             "conclus(?:[ãa]o|[õo]es)",
             "considera[çc][õo]es finais",
+            "conclusions?"
+          ]
+        },
+        {
+          "key": "recommendations",
+          "label": "Recomendações",
+          "patterns": [
             "recomenda[çc][õo]es",
-            "conclusions?",
-            "recommendations"
+            "pr[óo]ximos passos",
+            "recommendations",
+            "next steps"
           ]
         },
         {
@@ -65,6 +73,9 @@
             "(?:anexos?|ap[êe]ndices?|appendix|appendices)(?:\\s+(?:[\\dIVXLC]+|[A-Z]))?"
           ]
         }
+      ],
+      "open_sections": [
+        "recommendations"
       ]
     },
     "academic": {
@@ -192,7 +203,11 @@
           ]
         }
       ],
-      "name_pattern": "{year} - {title} - {authors}"
+      "name_pattern": "{year} - {title} - {authors}",
+      "open_sections": [
+        "future_work",
+        "limitations"
+      ]
     },
     "procedure": {
       "label": "Procedimento",
@@ -282,7 +297,8 @@
           ]
         }
       ],
-      "name_pattern": "{code} - {title}[ (v{version})]"
+      "name_pattern": "{code} - {title}[ (v{version})]",
+      "open_sections": []
     }
   }
 }

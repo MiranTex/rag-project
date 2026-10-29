@@ -494,3 +494,22 @@ O nome no sistema é o que aparece na lista, nas fontes e nas citações do agen
 | `"{code} - {title}[ (v{version})]"` | Partes sem valor desaparecem; `[...]` é um grupo opcional |
 
 Variável: `AUTO_RENAME_DOCUMENTS` (por defeito `true`).
+
+## Aula 17: Análise entre documentos
+
+Duas tools do agente que trabalham sobre vários documentos de uma vez. Devolvem excertos com página, sem chamar o LLM; o agente sintetiza e cita.
+
+| Tool | Para quê |
+|---|---|
+| `find_open_questions` | O que ficou em aberto: junta as secções `open_sections` de cada tipo. Com `query`, devolve os excertos em aberto mais relevantes para um tema; sem `query`, percorre os documentos que passam nos filtros, dos mais recentes para os mais antigos |
+| `compare_documents` | Matriz de 2 a 8 documentos × 1 a 6 dimensões em linguagem natural ("método", "dados usados"…). Cada célula é uma pesquisa restringida a esse documento; as colunas da ficha (título, ano, campos do tipo) vêm à parte. Para entregar a tabela em ficheiro, o agente usa `export_csv` |
+
+As secções em aberto configuram-se por tipo em `document_types.json`:
+
+| Tipo | `open_sections` |
+|---|---|
+| `academic` | `future_work`, `limitations` |
+| `generic` | `recommendations` (Recomendações, Próximos passos) |
+| `procedure` | nenhuma |
+
+Os documentos sem essas secções aparecem em `documents_without_open_sections`, para o agente os procurar nas conclusões.
