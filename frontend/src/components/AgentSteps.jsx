@@ -49,10 +49,10 @@ function describeArguments(name, args = {}) {
 }
 
 function StepIcon({ status }) {
-  if (status === "running") return <Loader2 className="size-3.5 animate-spin text-stone-500" />;
+  if (status === "running") return <Loader2 className="size-3.5 animate-spin text-stone-500 dark:text-stone-400" />;
   if (status === "stopped") return <Square className="size-3 text-stone-400" fill="currentColor" />;
-  if (status === "error") return <X className="size-3.5 text-red-600" />;
-  return <Check className="size-3.5 text-emerald-600" />;
+  if (status === "error") return <X className="size-3.5 text-red-600 dark:text-red-400" />;
+  return <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />;
 }
 
 function currentActivity(steps) {
@@ -84,7 +84,7 @@ export default function AgentSteps({ steps, done, stopped }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="group flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-800"
+        className="group flex items-center gap-1.5 text-sm text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200"
       >
         {!done && <Loader2 className="size-3.5 animate-spin" />}
         <span className={done ? "" : "animate-pulse"}>{summary}</span>
@@ -92,26 +92,26 @@ export default function AgentSteps({ steps, done, stopped }) {
       </button>
 
       {open && (
-        <ol className="animate-fade-up mt-2 space-y-2 border-l border-stone-200 pl-4 text-sm">
+        <ol className="animate-fade-up mt-2 space-y-2 border-l border-stone-200 dark:border-stone-800 pl-4 text-sm">
           {steps.map((step, i) => {
             if (step.type === "guard") {
               return (
                 <li key={i} className="flex items-start gap-2">
                   {step.allowed ? (
-                    <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+                    <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   ) : (
-                    <Ban className="mt-0.5 size-3.5 shrink-0 text-red-600" />
+                    <Ban className="mt-0.5 size-3.5 shrink-0 text-red-600 dark:text-red-400" />
                   )}
                   <span>
                     Verificação de âmbito{" "}
-                    <span className="text-stone-500">· {GUARD_LABELS[step.category] || step.category}</span>
+                    <span className="text-stone-500 dark:text-stone-400">· {GUARD_LABELS[step.category] || step.category}</span>
                   </span>
                 </li>
               );
             }
             if (step.type === "thinking") {
               return (
-                <li key={i} className="whitespace-pre-wrap text-stone-500">
+                <li key={i} className="whitespace-pre-wrap text-stone-500 dark:text-stone-400">
                   {step.text}
                 </li>
               );
@@ -123,15 +123,15 @@ export default function AgentSteps({ steps, done, stopped }) {
                   <StepIcon status={step.status} />
                 </span>
                 <span className="min-w-0">
-                  <span className="font-medium text-stone-800">{TOOL_LABELS[step.name] || step.name}</span>
-                  {args && <span className="ml-1.5 break-words font-mono text-xs text-stone-500">{args}</span>}
+                  <span className="font-medium text-stone-800 dark:text-stone-200">{TOOL_LABELS[step.name] || step.name}</span>
+                  {args && <span className="ml-1.5 break-words font-mono text-xs text-stone-500 dark:text-stone-400">{args}</span>}
                   {step.sideEffect && (
-                    <span className="ml-1.5 inline-flex items-center gap-1 rounded bg-stone-100 px-1.5 py-0.5 text-xs text-stone-600">
+                    <span className="ml-1.5 inline-flex items-center gap-1 rounded bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 text-xs text-stone-600 dark:text-stone-400">
                       <FilePlus2 className="size-3" />
                       cria ficheiro
                     </span>
                   )}
-                  {step.summary && <span className="block text-stone-500">{step.summary}</span>}
+                  {step.summary && <span className="block text-stone-500 dark:text-stone-400">{step.summary}</span>}
                 </span>
               </li>
             );

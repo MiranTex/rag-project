@@ -11,11 +11,11 @@ export default function ExportLinks({ exports }) {
           key={item.name}
           href={exportUrl(item.name)}
           download
-          className="flex items-center gap-2.5 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm hover:border-stone-300 hover:bg-stone-50"
+          className="flex items-center gap-2.5 rounded-lg border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-3 py-2 text-sm hover:border-stone-300 dark:hover:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-800"
         >
-          <FileDown className="size-4 text-accent-600" />
-          <span className="font-medium text-stone-800">{item.name}</span>
-          <span className="text-xs text-stone-500">Descarregar</span>
+          <FileDown className="size-4 text-accent-600 dark:text-accent-400" />
+          <span className="font-medium text-stone-800 dark:text-stone-200">{item.name}</span>
+          <span className="text-xs text-stone-500 dark:text-stone-400">Descarregar</span>
         </a>
       ))}
     </div>

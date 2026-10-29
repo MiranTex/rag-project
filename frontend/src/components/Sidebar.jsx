@@ -9,6 +9,9 @@ import {
   Trash2,
   Upload,
   X,
+  Monitor,
+  Moon,
+  Sun,
 } from "lucide-react";
 
 function useClickOutside(ref, onOutside, active) {
@@ -45,14 +48,14 @@ function UploadDropzone({ uploading, onUpload }) {
       }}
       className={`flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-3 py-2.5 text-sm transition-colors ${
         dragging
-          ? "border-accent-500 bg-accent-50 text-accent-700"
-          : "border-stone-300 text-stone-600 hover:border-stone-400 hover:bg-stone-100"
+          ? "border-accent-500 bg-accent-50 dark:bg-accent-500/15 text-accent-700 dark:text-accent-400"
+          : "border-stone-300 dark:border-stone-700 text-stone-600 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-600 hover:bg-stone-100 dark:hover:bg-stone-800"
       } ${uploading ? "pointer-events-none opacity-60" : ""}`}
     >
       <Upload className="size-4 shrink-0" />
       <span>
-        <span className="font-medium text-stone-800">Adicionar PDF</span>
-        <span className="block text-xs text-stone-500">ou arrasta o ficheiro para aqui</span>
+        <span className="font-medium text-stone-800 dark:text-stone-200">Adicionar PDF</span>
+        <span className="block text-xs text-stone-500 dark:text-stone-400">ou arrasta o ficheiro para aqui</span>
       </span>
       <input
         ref={inputRef}
@@ -75,33 +78,33 @@ function DocumentMenu({ doc, onReview, onReindex, onDelete, onClose }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   useClickOutside(ref, onClose, true);
 
-  const item = "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-stone-100";
+  const item = "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-stone-100 dark:hover:bg-stone-700";
 
   return (
     <div
       ref={ref}
-      className="animate-fade-up absolute right-1 top-9 z-20 w-48 rounded-lg border border-stone-200 bg-white p-1 shadow-lg"
+      className="animate-fade-up absolute right-1 top-9 z-20 w-48 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 p-1 shadow-lg dark:shadow-black/40"
     >
       <button type="button" className={item} onClick={() => onReview(doc.document_id)}>
-        <ScanText className="size-4 text-stone-500" />
+        <ScanText className="size-4 text-stone-500 dark:text-stone-400" />
         {doc.status === "pending_review" ? "Rever texto" : "Ver texto extraído"}
       </button>
       <button type="button" className={item} onClick={() => onReindex(doc.document_id)}>
-        <RotateCcw className="size-4 text-stone-500" />
+        <RotateCcw className="size-4 text-stone-500 dark:text-stone-400" />
         Extrair de novo
       </button>
-      <div className="my-1 h-px bg-stone-100" />
+      <div className="my-1 h-px bg-stone-100 dark:bg-stone-800" />
       {confirmDelete ? (
         <button
           type="button"
-          className={`${item} bg-red-50 font-medium text-red-700 hover:bg-red-100`}
+          className={`${item} bg-red-50 dark:bg-red-950/40 font-medium text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-950/60`}
           onClick={() => onDelete(doc.document_id)}
         >
           <Trash2 className="size-4" />
           Confirmar remoção
         </button>
       ) : (
-        <button type="button" className={`${item} text-red-700`} onClick={() => setConfirmDelete(true)}>
+        <button type="button" className={`${item} text-red-700 dark:text-red-300`} onClick={() => setConfirmDelete(true)}>
           <Trash2 className="size-4" />
           Remover
         </button>
@@ -126,16 +129,16 @@ function DocumentItem({ doc, onReview, onReindex, onDelete }) {
       <button
         type="button"
         onClick={() => onReview(doc.document_id)}
-        className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 pr-9 text-left hover:bg-stone-100"
+        className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 pr-9 text-left hover:bg-stone-100 dark:hover:bg-stone-800"
       >
-        <FileText className={`mt-0.5 size-4 shrink-0 ${pending ? "text-accent-500" : "text-stone-400"}`} />
+        <FileText className={`mt-0.5 size-4 shrink-0 ${pending ? "text-accent-500" : "text-stone-400 dark:text-stone-500"}`} />
         <span className="min-w-0">
-          <span className="block truncate text-sm text-stone-800" title={doc.filename}>
+          <span className="block truncate text-sm text-stone-800 dark:text-stone-200" title={doc.filename}>
             {doc.filename}
           </span>
-          <span className="block text-xs text-stone-500">
+          <span className="block text-xs text-stone-500 dark:text-stone-400">
             {pending ? (
-              <span className="font-medium text-accent-600">
+              <span className="font-medium text-accent-600 dark:text-accent-400">
                 Por rever{doc.alert_count > 0 && ` · ${doc.alert_count} alerta${doc.alert_count > 1 ? "s" : ""}`}
               </span>
             ) : (
@@ -151,8 +154,8 @@ function DocumentItem({ doc, onReview, onReindex, onDelete }) {
         type="button"
         aria-label={`Ações para ${doc.filename}`}
         onClick={() => setMenuOpen((open) => !open)}
-        className={`absolute right-1.5 top-1.5 rounded-md p-1 text-stone-500 hover:bg-stone-200 hover:text-stone-800 ${
-          menuOpen ? "bg-stone-200 opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
+        className={`absolute right-1.5 top-1.5 rounded-md p-1 text-stone-500 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-700 hover:text-stone-800 dark:hover:text-stone-200 ${
+          menuOpen ? "bg-stone-200 dark:bg-stone-700 opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
         }`}
       >
         <MoreHorizontal className="size-4" />
@@ -171,12 +174,42 @@ function DocumentItem({ doc, onReview, onReindex, onDelete }) {
 }
 
 function HealthDot({ label, ok }) {
-  const color = ok === undefined ? "bg-stone-300" : ok ? "bg-emerald-500" : "bg-red-500";
+  const color = ok === undefined ? "bg-stone-300 dark:bg-stone-600" : ok ? "bg-emerald-500" : "bg-red-500";
   return (
     <span className="flex items-center gap-1.5" title={ok === false ? `${label} indisponível` : label}>
       <span className={`size-1.5 rounded-full ${color}`} />
       {label}
     </span>
+  );
+}
+
+const THEME_OPTIONS = [
+  { value: "system", label: "Tema do sistema", icon: Monitor },
+  { value: "light", label: "Tema claro", icon: Sun },
+  { value: "dark", label: "Tema escuro", icon: Moon },
+];
+
+function ThemeSwitch({ theme, onThemeChange }) {
+  return (
+    <div className="ml-auto flex rounded-md bg-stone-200/60 p-0.5 dark:bg-stone-800" role="group" aria-label="Tema">
+      {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          title={label}
+          aria-label={label}
+          aria-pressed={theme === value}
+          onClick={() => onThemeChange(value)}
+          className={`rounded p-1 ${
+            theme === value
+              ? "bg-white text-stone-900 shadow-sm dark:bg-stone-600 dark:text-stone-100"
+              : "text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200"
+          }`}
+        >
+          <Icon className="size-3.5" />
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -191,6 +224,8 @@ export default function Sidebar({
   onDelete,
   onNewChat,
   health,
+  theme,
+  onThemeChange,
 }) {
   const pending = documents.filter((d) => d.status === "pending_review");
   const indexed = documents.filter((d) => d.status !== "pending_review");
@@ -200,7 +235,7 @@ export default function Sidebar({
     <>
       {open && <div className="fixed inset-0 z-30 bg-stone-900/30 md:hidden" onClick={onClose} />}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-stone-200 bg-stone-50 transition-transform md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950 transition-transform md:static md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -212,7 +247,7 @@ export default function Sidebar({
               onClick={onNewChat}
               title="Nova conversa"
               aria-label="Nova conversa"
-              className="rounded-md p-1.5 text-stone-600 hover:bg-stone-200 hover:text-stone-900"
+              className="rounded-md p-1.5 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-700 hover:text-stone-900 dark:hover:text-stone-100"
             >
               <SquarePen className="size-[18px]" />
             </button>
@@ -220,7 +255,7 @@ export default function Sidebar({
               type="button"
               onClick={onClose}
               aria-label="Fechar barra lateral"
-              className="rounded-md p-1.5 text-stone-600 hover:bg-stone-200 md:hidden"
+              className="rounded-md p-1.5 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-700 md:hidden"
             >
               <X className="size-[18px]" />
             </button>
@@ -233,18 +268,18 @@ export default function Sidebar({
 
         <nav className="mt-4 flex-1 space-y-5 overflow-y-auto px-2 pb-4">
           {uploadingName && (
-            <div className="flex items-center gap-2.5 px-2.5 text-sm text-stone-600">
+            <div className="flex items-center gap-2.5 px-2.5 text-sm text-stone-600 dark:text-stone-400">
               <Loader2 className="size-4 shrink-0 animate-spin" />
               <span className="min-w-0">
                 <span className="block truncate">{uploadingName}</span>
-                <span className="block text-xs text-stone-500">A extrair texto…</span>
+                <span className="block text-xs text-stone-500 dark:text-stone-400">A extrair texto…</span>
               </span>
             </div>
           )}
 
           {pending.length > 0 && (
             <section>
-              <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500">À espera de revisão</h2>
+              <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">À espera de revisão</h2>
               <ul>
                 {pending.map((doc) => (
                   <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />
@@ -254,7 +289,7 @@ export default function Sidebar({
           )}
 
           <section>
-            <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500">Documentos</h2>
+            <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Documentos</h2>
             {indexed.length ? (
               <ul>
                 {indexed.map((doc) => (
@@ -262,15 +297,16 @@ export default function Sidebar({
                 ))}
               </ul>
             ) : (
-              <p className="px-2.5 text-sm text-stone-500">Nenhum documento indexado.</p>
+              <p className="px-2.5 text-sm text-stone-500 dark:text-stone-400">Nenhum documento indexado.</p>
             )}
           </section>
         </nav>
 
-        <footer className="flex gap-4 border-t border-stone-200 px-4 py-3 text-xs text-stone-500">
+        <footer className="flex items-center gap-4 border-t border-stone-200 dark:border-stone-800 px-4 py-3 text-xs text-stone-500 dark:text-stone-400">
           <HealthDot label="API" ok={health ? !health.offline : undefined} />
           <HealthDot label="Modelo" ok={health?.lmstudio} />
           <HealthDot label="Chroma" ok={health?.chroma} />
+          <ThemeSwitch theme={theme} onThemeChange={onThemeChange} />
         </footer>
       </aside>
     </>

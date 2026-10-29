@@ -13,6 +13,7 @@ import {
 import ChatPanel from "./components/ChatPanel";
 import ReviewPanel from "./components/ReviewPanel";
 import Sidebar from "./components/Sidebar";
+import { useTheme } from "./theme";
 
 const CHAT_STORAGE_KEY = "rag-study-chat-history";
 const AGENT_HISTORY_TURNS = 6;
@@ -43,13 +44,13 @@ function Notice({ notice, onDismiss }) {
     <div className="pointer-events-none fixed inset-x-0 top-3 z-[60] flex justify-center px-4">
       <div
         role="status"
-        className={`animate-fade-up pointer-events-auto flex max-w-md items-start gap-2.5 rounded-xl border bg-white px-4 py-3 text-sm shadow-lg ${
-          isError ? "border-red-200 text-red-800" : "border-stone-200 text-stone-800"
+        className={`animate-fade-up pointer-events-auto flex max-w-md items-start gap-2.5 rounded-xl border bg-white dark:bg-stone-800 px-4 py-3 text-sm shadow-lg dark:shadow-black/40 ${
+          isError ? "border-red-200 dark:border-red-900 text-red-800 dark:text-red-300" : "border-stone-200 dark:border-stone-800 text-stone-800 dark:text-stone-200"
         }`}
       >
-        <Icon className={`mt-0.5 size-4 shrink-0 ${isError ? "text-red-600" : "text-emerald-600"}`} />
+        <Icon className={`mt-0.5 size-4 shrink-0 ${isError ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`} />
         <span>{notice.text}</span>
-        <button type="button" onClick={onDismiss} aria-label="Fechar aviso" className="text-stone-400 hover:text-stone-700">
+        <button type="button" onClick={onDismiss} aria-label="Fechar aviso" className="text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300">
           <X className="size-4" />
         </button>
       </div>
@@ -65,6 +66,7 @@ export default function App() {
   const [uploadingName, setUploadingName] = useState("");
   const [reviewingDocument, setReviewingDocument] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [theme, setTheme] = useTheme();
 
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
@@ -419,6 +421,8 @@ export default function App() {
           setSidebarOpen(false);
         }}
         health={health}
+        theme={theme}
+        onThemeChange={setTheme}
       />
 
       <ChatPanel
