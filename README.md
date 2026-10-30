@@ -513,3 +513,52 @@ As secções em aberto configuram-se por tipo em `document_types.json`:
 | `procedure` | nenhuma |
 
 Os documentos sem essas secções aparecem em `documents_without_open_sections`, para o agente os procurar nas conclusões.
+
+## Aula 18: Base de dados e indexação em background
+
+### Persistência atrás de contratos
+
+O código depende só de interfaces (`backend/repositories/contracts.py`):
+
+| Contrato | Guarda |
+|---|---|
+| `DocumentRepository` | Registo dos documentos (nome, estado, contagens, resumo da ficha) |
+| `ExtractionRepository` | Texto por página e ficha de cada documento |
+| `JobQueue` | Fila de trabalhos em background, partilhada pelos workers |
+
+A implementação é escolhida em `backend/dependencies.py`:
+- **`backend/repositories/sql.py` (SQLAlchemy Core):** é a mesma para SQLite e PostgreSQL, e só muda a `DATABASE_URL`:
+  - `sqlite:///backend/storage/rag.db` (por defeito);
+  - `postgresql+psycopg://utilizador:password@host:5432/rag`.
+- **Outro tipo de base de dados:** é uma implementação nova dos mesmos contratos, sem mexer no resto do código.
+- **Esquema:** evolui com as migrações Alembic em `backend/repositories/migrations`, aplicadas no arranque.
+- **Campos novos:** um campo novo num modelo precisa de uma migração. O teste `test_migrations_match_tables_and_models` falha se faltar.
+- **Testes de contrato:** a mesma bateria corre contra todas as implementações (`tests/test_repository_contract.py`, `tests/test_job_queue.py`). Com `TEST_DATABASE_URL`, corre também contra PostgreSQL:
+
+  ```bash
+  docker run -d --rm --name pg -e POSTGRES_USER=rag -e POSTGRES_PASSWORD=rag -e POSTGRES_DB=rag_test --network rag-project_default postgres:16-alpine
+  docker compose run --rm -e TEST_DATABASE_URL=postgresql+psycopg://rag:rag@pg:5432/rag_test backend pytest -q
+  ```
+- **Dados da versão anterior:** o `documents.json` e as `extractions/*.json` são importados no primeiro arranque, com a base vazia. O ficheiro fica como `documents.json.imported`, como cópia de segurança.
+- **Testes isolados:** o `tests/conftest.py` aponta as dependências reais para uma base temporária e um Chroma inexistente, para nenhum teste tocar nos dados da aplicação.
+
+### Fila de extração e indexação
+
+O upload e a aprovação já não esperam pelo OCR nem pelos embeddings.
+
+1. **`POST /documents/upload`:** grava `<id>.pdf`, regista o documento como `extracting`, põe um trabalho `extract` na fila e responde logo. Aceita vários ficheiros seguidos.
+2. **Um worker extrai** o texto (pypdf e OCR), valida as páginas e propõe a ficha. O documento passa a `pending_review`, ou é indexado logo se `AUTO_APPROVE_CLEAN_DOCUMENTS` estiver ligado e não houver alertas.
+3. **`POST /documents/{id}/approve`:** põe um trabalho `index` na fila (o documento fica `indexing`). Quando o trabalho termina, o documento passa a `indexed`.
+
+| Estado | Significado |
+|---|---|
+| `extracting` / `indexing` | Há um trabalho em fila ou a correr; o documento não se edita |
+| `pending_review` | À espera de revisão; se `error` estiver preenchido, a última indexação falhou e pode-se aprovar de novo |
+| `failed` | A extração falhou (`error` diz porquê); "Extrair de novo" ou remover |
+
+- **Um trabalho de cada vez por documento:** um pedido com outro já em curso devolve 409.
+- **Remover um documento:** cancela o trabalho que estiver em fila.
+- **Workers:** correm dentro da API (`INDEXING_WORKERS`, por defeito 1). Para os separar, põe-se `INDEXING_WORKERS=0` na API e corre-se `python -m backend.worker` noutro processo ou contentor, com a mesma `DATABASE_URL`, o mesmo `UPLOAD_DIR` e o mesmo Chroma.
+- **Trabalhos interrompidos:** os que ficaram `running` por um processo que morreu voltam à fila no arranque. São os deste contentor e os parados há mais de `JOB_STALE_MINUTES`.
+- **Estado da fila:** `GET /health` mostra os trabalhos por estado.
+- **Interface:** a lista atualiza-se sozinha enquanto houver documentos em processamento, e avisa quando um documento fica pronto para revisão, é indexado ou falha.

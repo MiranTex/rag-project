@@ -331,6 +331,15 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
           </button>
         </header>
 
+        {doc?.error && !readOnly && (
+          <p className="flex items-start gap-2 border-b border-red-200 bg-red-50 px-5 py-2.5 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>
+              A última indexação falhou: {doc.error}. O texto revisto mantém-se; podes aprovar de novo.
+            </span>
+          </p>
+        )}
+
         {pages.some((p) => p.alerts.length) && (
           <div className="flex items-center gap-2 px-5 pt-3 text-sm">
             <label className="flex cursor-pointer items-center gap-1.5 text-stone-600 dark:text-stone-400">

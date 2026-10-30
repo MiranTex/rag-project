@@ -14,6 +14,7 @@ from backend.dependencies import (
     NON_CONTENT_SECTIONS,
     get_document_types,
     get_extraction_store,
+    get_job_queue,
     get_keyword_index,
     get_profile_store,
     get_registry,
@@ -27,6 +28,7 @@ from backend.models import (
     DocumentMetadata,
     DocumentTypeField,
     DocumentTypeInfo,
+    Job,
     MetadataUpdate,
     PageAlert,
     PageOcrRequest,
@@ -43,6 +45,7 @@ from backend.services.document_naming import clean_name, unique_name
 from backend.services.document_types import DocumentType, section_label
 from backend.services.embeddings import embed_texts
 from backend.services.extraction_review import validate_page
+from backend.services.job_runner import JobRunner
 from backend.services.metadata_extraction import clean_fields, propose_metadata
 from backend.services.ocr import ocr_image, render_page
 from backend.services.pdf_ingestion import (
@@ -156,19 +159,20 @@ def _build_extraction(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentEx
     )
 
 
-def _extract_for_review(
-    document_id: str, filename: str, raw: bytes, previous: DocumentInfo | None = None
-) -> tuple[DocumentInfo, list[ReviewPage]]:
-    """Fase 1: extrai o texto (pypdf + OCR), valida cada página e deixa o documento à espera de revisão.
-    `previous` é o registo anterior quando o documento é extraído de novo (mantém o nome que tinha)."""
+def _extract_for_review(info: DocumentInfo, is_new: bool) -> tuple[DocumentInfo, list[ReviewPage]]:
+    """Fase 1 (em background): extrai o texto (pypdf + OCR), valida cada página, propõe a ficha e deixa o
+    documento à espera de revisão. O nome automático só se decide num upload novo (is_new)."""
     settings = get_settings()
     started = time.perf_counter()
-    logger.info("A extrair %s (%s)", filename, document_id)
-    # Em disco pelo id: o nome no sistema pode mudar e dois ficheiros com o mesmo nome não se sobrepõem.
-    stored_name = f"{document_id}.pdf"
-    saved_path = save_uploaded_file(settings.upload_dir, stored_name, raw)
-    if previous:
-        _drop_legacy_file(previous, stored_name)
+    document_id = info.document_id
+    logger.info("A extrair %s (%s)", info.original_filename or info.filename, document_id)
+
+    # O documento sai do índice antes de tudo: a pesquisa nunca usa texto por rever nem uma extração a meio.
+    get_vector_store().delete_document(document_id)
+    get_keyword_index().remove_document(document_id)
+    get_profile_store().delete_document(document_id)
+
+    saved_path = _stored_path(info)
     extracted = {
         page.page: page
         for page in extract_pages(
@@ -198,39 +202,19 @@ def _extract_for_review(
             )
         )
 
-    # O documento sai do índice até ser aprovado: a pesquisa nunca usa texto por rever.
-    get_vector_store().delete_document(document_id)
-    get_keyword_index().remove_document(document_id)
-    get_profile_store().delete_document(document_id)
     get_extraction_store().save(document_id, pages)
     metadata = _propose_metadata(pages)
     get_extraction_store().save_metadata(document_id, metadata)
 
-    original = previous.original_filename or previous.filename if previous else Path(filename).name
-    info = _with_counts(
-        DocumentInfo(
-            document_id=document_id,
-            filename=previous.filename if previous else unique_name(clean_name(original) or original, _taken_names(document_id)),
-            original_filename=original,
-            storage_name=stored_name,
-            name_source=previous.name_source if previous else "original",
-            sha256=file_sha256(raw),
-            created_at=utc_now_iso(),
-            chunk_count=0,
-            status="pending_review",
-            title=metadata.title,
-            year=metadata.year,
-            document_type=metadata.document_type,
-        ),
-        pages,
+    info = _with_counts(_with_metadata(info, metadata), pages).model_copy(
+        update={"status": "pending_review", "chunk_count": 0, "error": ""}
     )
-    # O nome automático só se decide no upload; ao extrair de novo mantém-se o nome que o documento já tinha.
-    if previous is None:
+    if is_new:
         info = get_renamer().name_at_upload(info, metadata)
     get_registry().add_or_replace(info)
     logger.info(
         "%s extraído em %.1fs como %s: %d página(s), %d alerta(s), ficha %s",
-        filename,
+        info.original_filename or document_id,
         time.perf_counter() - started,
         info.filename,
         info.page_count,
@@ -332,22 +316,52 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
     return indexed
 
 
-def _extract_and_maybe_approve(
-    document_id: str, filename: str, raw: bytes, previous: DocumentInfo | None = None
-) -> UploadResponse:
-    with _locked(document_id):
-        info, pages = _extract_for_review(document_id, filename, raw, previous)
-        if get_settings().auto_approve_clean_documents and info.alert_count == 0:
-            return UploadResponse(
-                message="Documento sem alertas: aprovado e indexado automaticamente.",
-                document=_approve(info, pages),
-            )
-    message = (
-        f"Texto extraído com {info.alert_count} alerta(s). Rever antes de indexar."
-        if info.alert_count
-        else "Texto extraído sem alertas. Aguarda aprovação para indexar."
-    )
-    return UploadResponse(message=message, document=info)
+def _run_extract_job(job: Job) -> None:
+    info = get_registry().find_by_id(job.document_id)
+    if info is None:
+        return  # removido enquanto esperava na fila
+    info, pages = _extract_for_review(info, is_new=bool(job.payload.get("new")))
+    if not (get_settings().auto_approve_clean_documents and info.alert_count == 0):
+        return
+    try:
+        _approve(info, pages)
+    except Exception as exc:
+        # A extração correu bem: o documento fica em revisão, com o motivo, em vez de "failed".
+        logger.exception("Indexação automática de %s falhou", info.filename)
+        get_registry().add_or_replace(info.model_copy(update={"error": f"Indexação automática falhou: {exc}"}))
+
+
+def _run_index_job(job: Job) -> None:
+    info, pages = _get_document_and_pages(job.document_id)
+    _approve(info, pages)
+
+
+def _on_job_failure(job: Job, message: str) -> None:
+    info = get_registry().find_by_id(job.document_id)
+    if info is None:
+        return
+    # Indexação falhada: volta à revisão (o texto revisto continua lá) para se aprovar de novo.
+    # Extração falhada: "failed", até alguém extrair de novo ou remover.
+    status = "pending_review" if job.kind == "index" else "failed"
+    get_registry().add_or_replace(info.model_copy(update={"status": status, "error": message}))
+
+
+JOB_HANDLERS = {"extract": _run_extract_job, "index": _run_index_job}
+
+
+def build_job_runner() -> JobRunner:
+    return JobRunner(get_job_queue(), JOB_HANDLERS, _on_job_failure, get_settings().job_poll_seconds)
+
+
+def _enqueue(info: DocumentInfo, kind: str, status: str, payload: dict | None = None) -> DocumentInfo:
+    """Põe o documento na fila (um trabalho de cada vez por documento) e regista o estado novo."""
+    queue = get_job_queue()
+    if queue.active_for_document(info.document_id):
+        raise HTTPException(status_code=409, detail="Documento já está a ser processado.")
+    updated = info.model_copy(update={"status": status, "error": ""})
+    get_registry().add_or_replace(updated)
+    queue.enqueue(kind, info.document_id, payload)
+    return updated
 
 
 def _get_document_and_pages(document_id: str) -> tuple[DocumentInfo, list[ReviewPage]]:
@@ -364,11 +378,10 @@ def _get_document_and_pages(document_id: str) -> tuple[DocumentInfo, list[Review
 
 
 def _require_pending(info: DocumentInfo) -> None:
+    if info.status in ("extracting", "indexing"):
+        raise HTTPException(status_code=409, detail="Documento a ser processado. Tenta de novo quando terminar.")
     if info.status != "pending_review":
-        raise HTTPException(
-            status_code=409,
-            detail="Documento já indexado. Use reindex para voltar à revisão.",
-        )
+        raise HTTPException(status_code=409, detail="Documento já indexado. Use reindex para voltar à revisão.")
 
 
 def _save_page(info: DocumentInfo, pages: list[ReviewPage], updated: ReviewPage) -> DocumentExtraction:
@@ -401,6 +414,11 @@ def delete_document(document_id: str) -> dict:
     existing = registry.find_by_id(document_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Documento não encontrado.")
+    queue = get_job_queue()
+    active = queue.active_for_document(document_id)
+    if active and active.status == "running":
+        raise HTTPException(status_code=409, detail="Documento a ser processado. Tenta de novo quando terminar.")
+    queue.cancel_queued(document_id)
 
     vector_store.delete_document(document_id)
     keyword_index.remove_document(document_id)
@@ -415,25 +433,39 @@ def delete_document(document_id: str) -> dict:
     return {"message": "Documento removido com sucesso."}
 
 
-@router.post("/{document_id}/reindex", response_model=UploadResponse)
-async def reindex_document(document_id: str) -> UploadResponse:
-    settings = get_settings()
-    registry = get_registry()
-
-    existing = registry.find_by_id(document_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Documento não encontrado.")
-
+def _reextract(existing: DocumentInfo) -> UploadResponse:
     upload_path = _stored_path(existing)
     if not upload_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Ficheiro original não encontrado no storage local.",
-        )
+        raise HTTPException(status_code=404, detail="Ficheiro original não encontrado no storage local.")
+    with _locked(existing.document_id):
+        # Documentos antigos estão em disco com o nome original: passam para <id>.pdf.
+        stored_name = f"{existing.document_id}.pdf"
+        if (existing.storage_name or existing.filename) != stored_name:
+            save_uploaded_file(get_settings().upload_dir, stored_name, upload_path.read_bytes())
+            _drop_legacy_file(existing, stored_name)
+            existing = existing.model_copy(
+                update={"storage_name": stored_name, "original_filename": existing.original_filename or existing.filename}
+            )
+        # Volta a extrair do zero: as edições manuais anteriores perdem-se; o nome mantém-se.
+        info = _enqueue(existing, "extract", "extracting", {"new": False})
+    return UploadResponse(message="Na fila para extrair de novo.", document=info)
 
-    raw = upload_path.read_bytes()
-    # Volta a extrair do zero: as edições manuais anteriores perdem-se.
-    return await run_in_threadpool(_extract_and_maybe_approve, document_id, existing.filename, raw, existing)
+
+@router.post("/{document_id}/reindex", response_model=UploadResponse)
+def reindex_document(document_id: str) -> UploadResponse:
+    existing = get_registry().find_by_id(document_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Documento não encontrado.")
+    return _reextract(existing)
+
+
+ALREADY_UPLOADED = {
+    "extracting": "Este documento já está a ser extraído.",
+    "pending_review": "Este documento já foi carregado e aguarda revisão.",
+    "indexing": "Este documento já está a ser indexado.",
+    "indexed": "Este documento já está indexado.",
+    "failed": "Este documento já foi carregado mas a extração falhou; usa Extrair de novo.",
+}
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -441,6 +473,7 @@ async def upload_document(
     file: UploadFile = File(...),
     reindex: bool = Form(False),
 ) -> UploadResponse:
+    """Guarda o PDF e põe-no na fila de extração; a resposta não espera pelo OCR."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Apenas ficheiros PDF são suportados.")
 
@@ -449,19 +482,31 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Ficheiro vazio.")
 
     settings = get_settings()
-    registry = get_registry()
-
     sha = file_sha256(raw)
-    existing = registry.find_by_hash(sha)
-    if existing and not reindex:
-        return UploadResponse(
-            message="Documento já indexado. Use reindex=true para forçar nova indexação.",
-            document=existing,
-        )
+    existing = get_registry().find_by_hash(sha)
+    if existing and reindex:
+        return _reextract(existing)
+    if existing:
+        return UploadResponse(message=ALREADY_UPLOADED.get(existing.status, "Documento já carregado."), document=existing)
 
-    document_id = existing.document_id if existing else str(uuid4())
-    # OCR e embeddings são CPU-bound: correr fora do event loop para não bloquear os outros pedidos.
-    return await run_in_threadpool(_extract_and_maybe_approve, document_id, file.filename, raw, existing)
+    document_id = str(uuid4())
+    stored_name = f"{document_id}.pdf"
+    # Em disco pelo id: o nome no sistema pode mudar e dois ficheiros com o mesmo nome não se sobrepõem.
+    save_uploaded_file(settings.upload_dir, stored_name, raw)
+    original = Path(file.filename).name
+    info = DocumentInfo(
+        document_id=document_id,
+        filename=unique_name(clean_name(original) or original, _taken_names(document_id)),
+        original_filename=original,
+        storage_name=stored_name,
+        sha256=sha,
+        created_at=utc_now_iso(),
+        chunk_count=0,
+        status="extracting",
+    )
+    with _locked(document_id):
+        info = _enqueue(info, "extract", "extracting", {"new": True})
+    return UploadResponse(message="Na fila para extração.", document=info)
 
 
 @router.get("/{document_id}/extraction", response_model=DocumentExtraction)
@@ -619,12 +664,12 @@ def rename_document(document_id: str, payload: RenameRequest) -> DocumentInfo:
 
 
 @router.post("/{document_id}/approve", response_model=UploadResponse)
-async def approve_document(document_id: str) -> UploadResponse:
-    def run() -> DocumentInfo:
-        with _locked(document_id):
-            info, pages = _get_document_and_pages(document_id)
-            _require_pending(info)
-            return _approve(info, pages)
-
-    indexed = await run_in_threadpool(run)
-    return UploadResponse(message="Documento aprovado e indexado.", document=indexed)
+def approve_document(document_id: str) -> UploadResponse:
+    """Põe o texto revisto na fila de indexação (chunks, embeddings, Chroma)."""
+    with _locked(document_id):
+        info, pages = _get_document_and_pages(document_id)
+        _require_pending(info)
+        if not any(not page.excluded and page.text.strip() for page in pages):
+            raise HTTPException(status_code=400, detail="Nenhuma página com texto para indexar.")
+        info = _enqueue(info, "index", "indexing")
+    return UploadResponse(message="Aprovado. Na fila para indexação.", document=info)

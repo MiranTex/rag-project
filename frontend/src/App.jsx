@@ -98,6 +98,32 @@ export default function App() {
   }, [messages]);
 
   const dismissNotice = useCallback(() => setNotice(null), []);
+  const previousStatuses = useRef({});
+
+  // Enquanto houver documentos a extrair ou a indexar, a lista atualiza-se sozinha.
+  const processing = documents.some((d) => d.status === "extracting" || d.status === "indexing");
+  useEffect(() => {
+    if (!processing) return undefined;
+    const timer = setInterval(() => {
+      getDocuments().then(setDocuments).catch(() => {});
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [processing]);
+
+  // Avisa quando um trabalho em background termina.
+  useEffect(() => {
+    const before = previousStatuses.current;
+    for (const doc of documents) {
+      const was = before[doc.document_id];
+      if (!was || was === doc.status || !["extracting", "indexing"].includes(was)) continue;
+      const name = doc.filename.replace(/\.pdf$/i, "");
+      if (doc.status === "failed") notify(`${name}: a extração falhou. ${doc.error}`, "error");
+      else if (doc.error) notify(`${name}: ${doc.error}`, "error");
+      else if (doc.status === "pending_review") notify(`${name} está pronto para revisão.`);
+      else if (doc.status === "indexed") notify(`${name} foi indexado.`);
+    }
+    previousStatuses.current = Object.fromEntries(documents.map((d) => [d.document_id, d.status]));
+  }, [documents]);
 
   function notify(text, tone = "ok") {
     setNotice({ text, tone, at: Date.now() });
@@ -194,25 +220,30 @@ export default function App() {
     }
   }
 
-  async function handleUpload(file) {
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      notify("Só são aceites ficheiros PDF.", "error");
-      return;
+  // O envio é rápido: a extração (OCR, ficha) corre em background e a lista vai mostrando o estado.
+  async function handleUpload(files) {
+    const pdfs = files.filter((file) => file.name.toLowerCase().endsWith(".pdf"));
+    if (pdfs.length < files.length) {
+      notify("Só são aceites ficheiros PDF; os outros foram ignorados.", "error");
     }
+    if (!pdfs.length) return;
 
-    setUploadingName(file.name);
-    try {
-      const result = await uploadDocument(file, false);
-      notify(result.message);
-      await refreshData();
-      if (result.document.status === "pending_review") {
-        setSidebarOpen(false);
-        setReviewingDocument(result.document.document_id);
+    const failed = [];
+    let lastMessage = "";
+    for (const [index, file] of pdfs.entries()) {
+      setUploadingName(pdfs.length > 1 ? `${file.name} (${index + 1} de ${pdfs.length})` : file.name);
+      try {
+        lastMessage = (await uploadDocument(file, false)).message;
+      } catch (err) {
+        failed.push(`${file.name}: ${err.message}`);
       }
-    } catch (err) {
-      notify(`Não foi possível carregar ${file.name}: ${err.message}`, "error");
-    } finally {
-      setUploadingName("");
+    }
+    setUploadingName("");
+    await refreshData().catch(() => {});
+    if (failed.length) {
+      notify(`Não foi possível carregar ${failed.join("; ")}`, "error");
+    } else {
+      notify(pdfs.length > 1 ? `${pdfs.length} documentos na fila para extração.` : lastMessage);
     }
   }
 
@@ -340,20 +371,12 @@ export default function App() {
   }
 
   async function handleReindex(documentId) {
-    const doc = documents.find((d) => d.document_id === documentId);
-    setUploadingName(doc?.filename || "Documento");
     try {
       const result = await reindexDocument(documentId);
       notify(result.message);
       await refreshData();
-      if (result.document.status === "pending_review") {
-        setSidebarOpen(false);
-        setReviewingDocument(documentId);
-      }
     } catch (err) {
       notify(`Não foi possível extrair de novo: ${err.message}`, "error");
-    } finally {
-      setUploadingName("");
     }
   }
 

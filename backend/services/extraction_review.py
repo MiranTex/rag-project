@@ -63,7 +63,8 @@ def validate_page(
 
 
 class ExtractionStore:
-    """Texto extraído por página, guardado entre a extração e a aprovação (e mantido depois, para consulta)."""
+    """Extrações e fichas em ficheiros JSON (versão anterior à base de dados). Cumpre ExtractionRepository;
+    hoje serve para importar os dados antigos (ver repositories/legacy_import.py)."""
 
     def __init__(self, directory: str = "backend/storage/extractions") -> None:
         self.directory = Path(directory)

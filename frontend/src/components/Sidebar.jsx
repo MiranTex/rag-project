@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AlertCircle,
   FileText,
   Loader2,
   MoreHorizontal,
@@ -32,8 +33,7 @@ function UploadDropzone({ uploading, onUpload }) {
   const inputRef = useRef(null);
 
   function pick(files) {
-    const file = files?.[0];
-    if (file) onUpload(file);
+    if (files?.length) onUpload([...files]);
   }
 
   return (
@@ -56,13 +56,14 @@ function UploadDropzone({ uploading, onUpload }) {
     >
       <Upload className="size-4 shrink-0" />
       <span>
-        <span className="font-medium text-stone-800 dark:text-stone-200">Adicionar PDF</span>
-        <span className="block text-xs text-stone-500 dark:text-stone-400">ou arrasta o ficheiro para aqui</span>
+        <span className="font-medium text-stone-800 dark:text-stone-200">Adicionar PDFs</span>
+        <span className="block text-xs text-stone-500 dark:text-stone-400">ou arrasta os ficheiros para aqui</span>
       </span>
       <input
         ref={inputRef}
         type="file"
         accept="application/pdf"
+        multiple
         className="sr-only"
         disabled={uploading}
         onChange={(e) => {
@@ -75,7 +76,7 @@ function UploadDropzone({ uploading, onUpload }) {
   );
 }
 
-function DocumentMenu({ doc, onReview, onRename, onReindex, onDelete, onClose }) {
+function DocumentMenu({ doc, busy, onReview, onRename, onReindex, onDelete, onClose }) {
   const ref = useRef(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useClickOutside(ref, onClose, true);
@@ -87,19 +88,26 @@ function DocumentMenu({ doc, onReview, onRename, onReindex, onDelete, onClose })
       ref={ref}
       className="animate-fade-up absolute right-1 top-9 z-20 w-48 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 p-1 shadow-lg dark:shadow-black/40"
     >
-      <button type="button" className={item} onClick={() => onReview(doc.document_id)}>
-        <ScanText className="size-4 text-stone-500 dark:text-stone-400" />
-        {doc.status === "pending_review" ? "Rever texto" : "Ver texto extraído"}
-      </button>
-      <button type="button" className={item} onClick={() => onRename(doc.document_id)}>
-        <Pencil className="size-4 text-stone-500 dark:text-stone-400" />
-        Renomear
-      </button>
-      <button type="button" className={item} onClick={() => onReindex(doc.document_id)}>
-        <RotateCcw className="size-4 text-stone-500 dark:text-stone-400" />
-        Extrair de novo
-      </button>
-      <div className="my-1 h-px bg-stone-100 dark:bg-stone-800" />
+      {/* Enquanto há um trabalho em background, só se pode remover (cancela o que estiver em fila). */}
+      {!busy && (
+        <>
+          {doc.status !== "failed" && (
+            <button type="button" className={item} onClick={() => onReview(doc.document_id)}>
+              <ScanText className="size-4 text-stone-500 dark:text-stone-400" />
+              {doc.status === "pending_review" ? "Rever texto" : "Ver texto extraído"}
+            </button>
+          )}
+          <button type="button" className={item} onClick={() => onRename(doc.document_id)}>
+            <Pencil className="size-4 text-stone-500 dark:text-stone-400" />
+            Renomear
+          </button>
+          <button type="button" className={item} onClick={() => onReindex(doc.document_id)}>
+            <RotateCcw className="size-4 text-stone-500 dark:text-stone-400" />
+            Extrair de novo
+          </button>
+          <div className="my-1 h-px bg-stone-100 dark:bg-stone-800" />
+        </>
+      )}
       {confirmDelete ? (
         <button
           type="button"
@@ -171,6 +179,8 @@ function DocumentItem({ doc, onReview, onRename, onReindex, onDelete }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const pending = doc.status === "pending_review";
+  const busy = doc.status === "extracting" || doc.status === "indexing";
+  const failed = doc.status === "failed";
 
   if (renaming) {
     return (
@@ -192,9 +202,16 @@ function DocumentItem({ doc, onReview, onRename, onReindex, onDelete }) {
       <button
         type="button"
         onClick={() => onReview(doc.document_id)}
-        className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 pr-9 text-left hover:bg-stone-100 dark:hover:bg-stone-800"
+        disabled={busy || failed}
+        className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 pr-9 text-left enabled:hover:bg-stone-100 disabled:cursor-default dark:enabled:hover:bg-stone-800"
       >
-        <FileText className={`mt-0.5 size-4 shrink-0 ${pending ? "text-accent-500" : "text-stone-400 dark:text-stone-500"}`} />
+        {busy ? (
+          <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-stone-400 dark:text-stone-500" />
+        ) : failed ? (
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400" />
+        ) : (
+          <FileText className={`mt-0.5 size-4 shrink-0 ${pending ? "text-accent-500" : "text-stone-400 dark:text-stone-500"}`} />
+        )}
         <span className="min-w-0">
           <span
             className="block truncate text-sm text-stone-800 dark:text-stone-200"
@@ -204,8 +221,14 @@ function DocumentItem({ doc, onReview, onRename, onReindex, onDelete }) {
           >
             {displayName(doc.filename)}
           </span>
-          <span className="block text-xs text-stone-500 dark:text-stone-400">
-            {pending ? (
+          <span className="block text-xs text-stone-500 dark:text-stone-400" title={doc.error || undefined}>
+            {busy ? (
+              doc.status === "extracting" ? "A extrair texto…" : "A indexar…"
+            ) : failed ? (
+              <span className="block truncate text-red-600 dark:text-red-400">Falhou · {doc.error || "erro desconhecido"}</span>
+            ) : pending && doc.error ? (
+              <span className="font-medium text-amber-700 dark:text-amber-400">Indexação falhou · aprova de novo</span>
+            ) : pending ? (
               <span className="font-medium text-accent-600 dark:text-accent-400">
                 Por rever{doc.alert_count > 0 && ` · ${doc.alert_count} alerta${doc.alert_count > 1 ? "s" : ""}`}
               </span>
@@ -231,6 +254,7 @@ function DocumentItem({ doc, onReview, onRename, onReindex, onDelete }) {
       {menuOpen && (
         <DocumentMenu
           doc={doc}
+          busy={busy}
           onReview={act(onReview)}
           onRename={() => {
             setMenuOpen(false);
@@ -309,8 +333,9 @@ export default function Sidebar({
       return terms.every((term) => haystack.includes(term));
     })
     .sort((a, b) => a.filename.localeCompare(b.filename, "pt", { numeric: true }));
-  const pending = visible.filter((d) => d.status === "pending_review");
-  const indexed = visible.filter((d) => d.status !== "pending_review");
+  const processing = visible.filter((d) => d.status === "extracting" || d.status === "indexing");
+  const pending = visible.filter((d) => d.status === "pending_review" || d.status === "failed");
+  const indexed = visible.filter((d) => d.status === "indexed");
   const itemProps = { onReview, onRename, onReindex, onDelete };
 
   return (
@@ -368,14 +393,25 @@ export default function Sidebar({
               <Loader2 className="size-4 shrink-0 animate-spin" />
               <span className="min-w-0">
                 <span className="block truncate">{uploadingName}</span>
-                <span className="block text-xs text-stone-500 dark:text-stone-400">A extrair texto…</span>
+                <span className="block text-xs text-stone-500 dark:text-stone-400">A enviar…</span>
               </span>
             </div>
           )}
 
+          {processing.length > 0 && (
+            <section>
+              <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Em processamento</h2>
+              <ul>
+                {processing.map((doc) => (
+                  <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />
+                ))}
+              </ul>
+            </section>
+          )}
+
           {pending.length > 0 && (
             <section>
-              <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">À espera de revisão</h2>
+              <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Precisa de atenção</h2>
               <ul>
                 {pending.map((doc) => (
                   <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />

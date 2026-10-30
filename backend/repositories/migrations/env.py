@@ -1,0 +1,28 @@
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+from backend.repositories.sql import metadata_obj
+
+config = context.config
+target_metadata = metadata_obj
+
+
+def run_migrations_offline() -> None:
+    context.configure(url=config.get_main_option("sqlalchemy.url"), target_metadata=target_metadata, literal_binds=True)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    connectable = engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool)
+    with connectable.connect() as connection:
+        # render_as_batch: o SQLite não altera colunas no sítio; o Alembic recria a tabela quando é preciso.
+        context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=True)
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

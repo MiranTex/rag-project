@@ -9,10 +9,11 @@ from PIL import Image, ImageDraw, ImageFont
 import backend.api.documents as documents_api
 from backend.config import Settings
 from backend.models import ReviewPage
-from backend.services.document_registry import DocumentRegistry
+from backend.repositories.sql import SqlDocumentRepository, SqlExtractionRepository, SqlJobQueue
 from backend.services.document_renamer import DocumentRenamer
 from backend.services.pdf_ingestion import ExtractedPage
 from backend.services.extraction_review import ExtractionStore, garbled_ratio, validate_page
+from tests.repository_fixtures import sql_engine
 
 
 def _codes(text, source="text", confidence=None):
@@ -113,10 +114,12 @@ def _image_only_pdf(path, lines):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    engine = sql_engine("sqlite", tmp_path)
     state = {
         "settings": Settings(_env_file=None, upload_dir=str(tmp_path / "uploads"), ocr_enabled=False),
-        "registry": DocumentRegistry(str(tmp_path / "docs.json")),
-        "store": ExtractionStore(str(tmp_path / "extractions")),
+        "registry": SqlDocumentRepository(engine),
+        "store": SqlExtractionRepository(engine),
+        "queue": SqlJobQueue(engine),
         "vectors": _FakeVectorStore(),
         "keywords": _FakeKeywordIndex(),
     }
@@ -124,6 +127,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(documents_api, "get_settings", lambda: state["settings"])
     monkeypatch.setattr(documents_api, "get_registry", lambda: state["registry"])
     monkeypatch.setattr(documents_api, "get_extraction_store", lambda: state["store"])
+    monkeypatch.setattr(documents_api, "get_job_queue", lambda: state["queue"])
     monkeypatch.setattr(documents_api, "get_vector_store", lambda: state["vectors"])
     monkeypatch.setattr(documents_api, "get_keyword_index", lambda: state["keywords"])
     monkeypatch.setattr(documents_api, "embed_texts", lambda model, texts: [[0.0] for _ in texts])
@@ -145,16 +149,37 @@ def env(tmp_path, monkeypatch):
     app.include_router(documents_api.router)
     state["client"] = TestClient(app)
     state["tmp_path"] = tmp_path
+    # Sem workers em threads: os testes processam a fila quando querem.
+    state["run_jobs"] = documents_api.build_job_runner().run_until_idle
     return state
 
 
-def _upload(env, lines):
+def _post_pdf(env, lines):
     pdf_path = env["tmp_path"] / "scan.pdf"
     _image_only_pdf(pdf_path, lines)
     with pdf_path.open("rb") as f:
         res = env["client"].post("/documents/upload", files={"file": ("scan.pdf", f, "application/pdf")})
     assert res.status_code == 200, res.text
-    return res.json()["document"]
+    return res.json()
+
+
+def _doc(env, document_id):
+    return env["registry"].find_by_id(document_id).model_dump()
+
+
+def _upload(env, lines):
+    """Carrega e corre a extração (que em produção corre em background)."""
+    doc = _post_pdf(env, lines)["document"]
+    env["run_jobs"]()
+    return _doc(env, doc["document_id"])
+
+
+def _approve(env, document_id):
+    res = env["client"].post(f"/documents/{document_id}/approve")
+    assert res.status_code == 200, res.text
+    assert res.json()["document"]["status"] == "indexing"
+    env["run_jobs"]()
+    return _doc(env, document_id)
 
 
 def test_upload_waits_for_review_then_manual_text_is_indexed(env):
@@ -178,9 +203,7 @@ def test_upload_waits_for_review_then_manual_text_is_indexed(env):
     assert page["source"] == "manual" and page["edited"] and page["alerts"] == []
     assert extraction["document"]["alert_count"] == 0
 
-    res = client.post(f"/documents/{doc_id}/approve")
-    assert res.status_code == 200
-    assert res.json()["document"]["status"] == "indexed"
+    assert _approve(env, doc_id)["status"] == "indexed"
     [chunk] = env["vectors"].chunks.values()
     assert chunk["metadata"]["extraction"] == "manual" and chunk["metadata"]["edited"] is True
     assert doc_id in env["keywords"].documents
@@ -203,11 +226,13 @@ def test_reindex_returns_document_to_review(env):
     client = env["client"]
     doc_id = _upload(env, ["Contrato"])["document_id"]
     client.put(f"/documents/{doc_id}/pages/1", json={"text": "Contrato de trabalho celebrado entre as partes."})
-    client.post(f"/documents/{doc_id}/approve")
+    _approve(env, doc_id)
 
     res = client.post(f"/documents/{doc_id}/reindex")
+    assert res.json()["document"]["status"] == "extracting"
+    env["run_jobs"]()
 
-    assert res.json()["document"]["status"] == "pending_review"
+    assert _doc(env, doc_id)["status"] == "pending_review"
     assert env["vectors"].chunks == {}
     assert doc_id not in env["keywords"].documents
 
@@ -256,8 +281,7 @@ def test_metadata_and_sections_flow_into_indexed_chunks(env):
     assert extraction["document"]["title"] == "Recomendação de Livros"
     assert extraction["document"]["document_type"] == "academic"
 
-    res = client.post(f"/documents/{doc_id}/approve")
-    assert res.json()["document"]["year"] == 2024
+    assert _approve(env, doc_id)["year"] == 2024
 
     chunks = [c["metadata"] for c in env["vectors"].chunks.values()]
     assert {c["section"] for c in chunks} == {"abstract", "introduction", "conclusion", "references"}
@@ -314,7 +338,7 @@ def test_documents_are_stored_by_id_and_named_at_upload(env, monkeypatch):
     doc = client.put(f"/documents/{doc_id}/name", json={"name": "Livros: estudo/2024"}).json()
     assert (doc["filename"], doc["name_source"]) == ("Livros estudo 2024.pdf", "manual")
 
-    client.post(f"/documents/{doc_id}/approve")
+    _approve(env, doc_id)
     assert {c["metadata"]["filename"] for c in env["vectors"].chunks.values()} == {"Livros estudo 2024.pdf"}
 
     # Num documento indexado, usar a sugestão muda o nome também nos excertos e no índice de palavras-chave.
@@ -324,15 +348,16 @@ def test_documents_are_stored_by_id_and_named_at_upload(env, monkeypatch):
     assert {c["metadata"]["filename"] for c in env["keywords"].documents[doc_id]} == {doc["filename"]}
 
     # Extrair de novo mantém o nome.
-    doc = client.post(f"/documents/{doc_id}/reindex").json()["document"]
-    assert doc["filename"] == "2024 - Livros nas Bibliotecas - Ana Martins.pdf"
+    client.post(f"/documents/{doc_id}/reindex")
+    env["run_jobs"]()
+    assert _doc(env, doc_id)["filename"] == "2024 - Livros nas Bibliotecas - Ana Martins.pdf"
 
     client.delete(f"/documents/{doc_id}")
     assert not (uploads / f"{doc_id}.pdf").exists()
 
 
 def test_documents_with_the_same_name_keep_separate_files_and_names(env):
-    first = _upload(env, ["Primeiro documento"])
+    first = _post_pdf(env, ["Primeiro documento"])["document"]
     pdf_path = env["tmp_path"] / "scan.pdf"
     _image_only_pdf(pdf_path, ["Segundo documento diferente"])
     with pdf_path.open("rb") as f:
@@ -351,3 +376,61 @@ def test_rename_rejects_invalid_names(env):
     # Sem título na ficha não há nome sugerido.
     assert env["client"].put(f"/documents/{doc_id}/name", json={"name": None}).status_code == 422
     assert env["client"].put("/documents/nao-existe/name", json={"name": "x"}).status_code == 404
+
+
+def test_upload_answers_before_extraction_and_rejects_duplicates(env):
+    first = _post_pdf(env, ["Contrato"])
+    assert (first["message"], first["document"]["status"]) == ("Na fila para extração.", "extracting")
+    assert env["queue"].active_for_document(first["document"]["document_id"]).kind == "extract"
+
+    # O mesmo ficheiro outra vez não cria outro documento.
+    again = _post_pdf(env, ["Contrato"])
+    assert again["document"]["document_id"] == first["document"]["document_id"]
+    assert again["message"] == "Este documento já está a ser extraído."
+
+
+def test_failed_extraction_is_reported_on_the_document(env, monkeypatch):
+    def broken(path, **kwargs):
+        raise ValueError("PDF corrompido")
+
+    working = documents_api.extract_pages
+    monkeypatch.setattr(documents_api, "extract_pages", broken)
+    doc = _upload(env, ["Contrato"])
+
+    assert (doc["status"], doc["error"]) == ("failed", "PDF corrompido")
+    # Extrair de novo limpa o erro.
+    monkeypatch.setattr(documents_api, "extract_pages", working)
+    res = env["client"].post(f"/documents/{doc['document_id']}/reindex").json()["document"]
+    assert (res["status"], res["error"]) == ("extracting", "")
+
+
+def test_failed_indexing_returns_to_review(env, monkeypatch):
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    env["client"].put(f"/documents/{doc_id}/pages/1", json={"text": "Texto suficiente para passar a validação automática."})
+
+    def chroma_down(model, texts):
+        raise ConnectionError("Chroma indisponível")
+
+    monkeypatch.setattr(documents_api, "embed_texts", chroma_down)
+    doc = _approve(env, doc_id)
+
+    assert (doc["status"], doc["error"]) == ("pending_review", "Chroma indisponível")
+
+
+def test_one_job_at_a_time_per_document(env):
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    env["client"].put(f"/documents/{doc_id}/pages/1", json={"text": "Texto suficiente para passar a validação automática."})
+
+    assert env["client"].post(f"/documents/{doc_id}/approve").status_code == 200
+    assert env["client"].post(f"/documents/{doc_id}/approve").status_code == 409
+    assert env["client"].post(f"/documents/{doc_id}/reindex").status_code == 409
+    # Enquanto está na fila não se edita.
+    assert env["client"].put(f"/documents/{doc_id}/pages/1", json={"excluded": True}).status_code == 409
+
+
+def test_deleting_a_queued_document_cancels_its_job(env):
+    doc_id = _post_pdf(env, ["Contrato"])["document"]["document_id"]
+
+    assert env["client"].delete(f"/documents/{doc_id}").status_code == 200
+    assert env["queue"].active_for_document(doc_id) is None
+    assert env["run_jobs"]() == 0

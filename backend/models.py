@@ -3,7 +3,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-DocumentStatus = Literal["pending_review", "indexed"]
+# extracting/indexing: há um trabalho em background (ver JobQueue); failed: a extração falhou (ver error).
+DocumentStatus = Literal["extracting", "pending_review", "indexing", "indexed", "failed"]
 # original: nome do ficheiro carregado; suggested: gerado da ficha no upload; manual: escolhido à mão.
 NameSource = Literal["original", "suggested", "manual"]
 
@@ -27,6 +28,8 @@ class DocumentInfo(BaseModel):
     title: str = ""
     year: int | None = None
     document_type: str = ""
+    # Último erro de um trabalho em background (vazio quando correu bem).
+    error: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -194,3 +197,20 @@ class ExportInfo(BaseModel):
     name: str
     size: int
     created_at: str
+
+
+JobStatus = Literal["queued", "running", "done", "failed"]
+
+
+class Job(BaseModel):
+    id: int
+    kind: str
+    document_id: str
+    status: JobStatus
+    payload: dict = Field(default_factory=dict)
+    error: str = ""
+    attempts: int = 0
+    worker_id: str = ""
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None

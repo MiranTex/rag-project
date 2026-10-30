@@ -3,7 +3,7 @@ from threading import Lock
 
 from backend.models import DocumentInfo, DocumentMetadata
 from backend.services.document_naming import clean_name, suggest_name, unique_name
-from backend.services.document_registry import DocumentRegistry
+from backend.repositories.contracts import DocumentRepository
 from backend.services.document_types import DocumentTypes
 from backend.services.keyword_index import KeywordIndex
 from backend.services.vector_store import VectorStore
@@ -22,7 +22,7 @@ class DocumentRenamer:
 
     def __init__(
         self,
-        registry: DocumentRegistry,
+        registry: DocumentRepository,
         vector_store: VectorStore,
         keyword_index: KeywordIndex,
         profile_store: VectorStore,

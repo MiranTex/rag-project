@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 150
     upload_dir: str = "data/uploads"
+    # Base de dados (registo, extrações, fila de trabalhos): sqlite:///… ou postgresql+psycopg://…
+    database_url: str = "sqlite:///backend/storage/rag.db"
+    # Workers da fila de extração/indexação dentro da API; 0 se correrem noutro processo (python -m backend.worker).
+    indexing_workers: int = 1
+    job_poll_seconds: float = 1.0
+    # Trabalhos "running" há mais do que isto voltam à fila (worker que morreu a meio).
+    job_stale_minutes: int = 60
     export_dir: str = "data/exports"
     agent_max_steps: int = 8
     guard_enabled: bool = True

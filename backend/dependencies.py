@@ -1,15 +1,19 @@
 import logging
 from functools import lru_cache
 
+from sqlalchemy import Engine
+
 from backend.agent.guard import ScopeGuard
 from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_settings
+from backend.repositories.contracts import DocumentRepository, ExtractionRepository, JobQueue
+from backend.repositories.database import upgrade_database
+from backend.repositories.legacy_import import import_legacy_json
+from backend.repositories.sql import SqlDocumentRepository, SqlExtractionRepository, SqlJobQueue, create_db_engine
 from backend.services.document_profiles import upsert_profile
-from backend.services.document_registry import DocumentRegistry
 from backend.services.document_renamer import DocumentRenamer
-from backend.services.export_store import ExportStore
 from backend.services.document_types import DocumentTypes, load_document_types
-from backend.services.extraction_review import ExtractionStore
+from backend.services.export_store import ExportStore
 from backend.services.keyword_index import KeywordIndex
 from backend.services.lmstudio_client import LMStudioClient
 from backend.services.rag_pipeline import RagPipeline
@@ -17,8 +21,23 @@ from backend.services.vector_store import VectorStore
 
 
 @lru_cache(maxsize=1)
-def get_registry() -> DocumentRegistry:
-    return DocumentRegistry()
+def get_database() -> Engine:
+    """Engine da base de dados, com o esquema atualizado e os dados JSON antigos importados (uma vez)."""
+    url = get_settings().database_url
+    upgrade_database(url)
+    engine = create_db_engine(url)
+    import_legacy_json(SqlDocumentRepository(engine), SqlExtractionRepository(engine))
+    return engine
+
+
+@lru_cache(maxsize=1)
+def get_registry() -> DocumentRepository:
+    return SqlDocumentRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_job_queue() -> JobQueue:
+    return SqlJobQueue(get_database())
 
 
 @lru_cache(maxsize=1)
@@ -27,8 +46,8 @@ def get_document_types() -> DocumentTypes:
 
 
 @lru_cache(maxsize=1)
-def get_extraction_store() -> ExtractionStore:
-    return ExtractionStore()
+def get_extraction_store() -> ExtractionRepository:
+    return SqlExtractionRepository(get_database())
 
 
 @lru_cache(maxsize=1)
