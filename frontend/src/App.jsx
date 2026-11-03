@@ -22,9 +22,16 @@ import Login from "./components/Login";
 import ReviewPanel from "./components/ReviewPanel";
 import Sidebar from "./components/Sidebar";
 import AccountPage from "./pages/AccountPage";
+import DiscoverPage from "./pages/DiscoverPage";
 import DocumentsPage from "./pages/DocumentsPage";
+import FeedbackPage from "./pages/FeedbackPage";
+import FilesPage from "./pages/FilesPage";
+import ProjectsPage from "./pages/ProjectsPage";
+import SearchPage from "./pages/SearchPage";
 import SettingsPage from "./pages/SettingsPage";
 import UsersPage from "./pages/UsersPage";
+import ProjectPage from "./pages/project/ProjectPage";
+import { ResearchProvider } from "./research/ResearchContext";
 import { useTheme } from "./theme";
 
 const CHAT_STORAGE_PREFIX = "rag-study-chat-history";
@@ -77,6 +84,8 @@ const DOCUMENTS_REVIEW = "documents:review";
 const DOCUMENTS_APPROVE = "documents:approve";
 const USERS_MANAGE = "users:manage";
 const SETTINGS_MANAGE = "settings:manage";
+const RESEARCH_USE = "research:use";
+const FEEDBACK_READ = "feedback:read";
 
 function Workspace({ session, authConfig, onLogout }) {
   const navigate = useNavigate();
@@ -89,6 +98,8 @@ function Workspace({ session, authConfig, onLogout }) {
   const [notice, setNotice] = useState(null);
   const [uploadingName, setUploadingName] = useState("");
   const [reviewingDocument, setReviewingDocument] = useState(null);
+  // Projeto de pesquisa onde o chat pesquisa ("" = toda a base).
+  const [activeProjectId, setActiveProjectId] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useTheme();
 
@@ -188,7 +199,16 @@ function Workspace({ session, authConfig, onLogout }) {
 
     setMessages((prev) => [
       ...prev,
-      { id: pendingIndex, mode: "agent", question: cleanQuestion, answer: "", sources: [], steps: [], exports: [] },
+      {
+        id: pendingIndex,
+        mode: "agent",
+        question: cleanQuestion,
+        answer: "",
+        sources: [],
+        steps: [],
+        exports: [],
+        projectId: activeProjectId || null,
+      },
     ]);
 
     try {
@@ -196,6 +216,7 @@ function Workspace({ session, authConfig, onLogout }) {
         {
           question: cleanQuestion,
           profile: profile || null,
+          project_id: activeProjectId || null,
           history,
         },
         ({ event, data }) => {
@@ -297,6 +318,7 @@ function Workspace({ session, authConfig, onLogout }) {
         id: pendingIndex,
         mode: "rag",
         question: cleanQuestion,
+        projectId: activeProjectId || null,
         answer: "",
         sources: [],
         retrievalDiagnostics: [],
@@ -308,6 +330,7 @@ function Workspace({ session, authConfig, onLogout }) {
       await askQuestionStream(
         {
           question: cleanQuestion,
+          project_id: activeProjectId || null,
           include_debug: true,
           multi_query: multiQuery,
         },
@@ -455,103 +478,124 @@ function Workspace({ session, authConfig, onLogout }) {
 
   const indexedDocuments = documents.filter((d) => d.status === "indexed");
   const attentionCount = documents.filter((d) => d.status === "pending_review" || d.status === "failed").length;
-  const pages = { documents: canReadDocuments, users: can(USERS_MANAGE), settings: can(SETTINGS_MANAGE) };
+  const pages = {
+    documents: canReadDocuments,
+    research: can(RESEARCH_USE),
+    users: can(USERS_MANAGE),
+    settings: can(SETTINGS_MANAGE),
+    feedback: can(FEEDBACK_READ),
+  };
   const openSidebar = () => setSidebarOpen(true);
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <Sidebar
-        open={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        onNewChat={() => {
-          handleClearChat();
-          setSidebarOpen(false);
-          navigate("/");
-        }}
-        health={health}
-        theme={theme}
-        onThemeChange={setTheme}
-        pages={pages}
-        attentionCount={attentionCount}
-        user={session.user}
-        canChangePassword={authConfig.mode === "local"}
-        onLogout={onLogout}
-      />
-
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <ChatPanel
-              messages={messages}
-              asking={asking}
-              onClear={handleClearChat}
-              onExport={handleExportChat}
-              onOpenSidebar={openSidebar}
-              documents={indexedDocuments}
-              pendingCount={documents.length - indexedDocuments.length}
-              knowsDocuments={canReadDocuments}
-              question={question}
-              onQuestionChange={setQuestion}
-              onAsk={handleAsk}
-              onStop={handleStop}
-              mode={mode}
-              onModeChange={setMode}
-              profiles={profiles}
-              profile={profile}
-              onProfileChange={setProfile}
-              multiQuery={multiQuery}
-              onMultiQueryChange={setMultiQuery}
-            />
-          }
+    <ResearchProvider notify={notify} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId}>
+      <div className="flex h-full overflow-hidden">
+        <Sidebar
+          open={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onNewChat={() => {
+            handleClearChat();
+            setSidebarOpen(false);
+            navigate("/");
+          }}
+          health={health}
+          theme={theme}
+          onThemeChange={setTheme}
+          pages={pages}
+          attentionCount={attentionCount}
+          user={session.user}
+          canChangePassword={authConfig.mode === "local"}
+          onLogout={onLogout}
         />
-        {pages.documents && (
+
+        <Routes>
           <Route
-            path="/documentos"
+            path="/"
             element={
-              <DocumentsPage
-                documents={documents}
-                uploadingName={uploadingName}
-                onUpload={handleUpload}
-                canUpload={can(DOCUMENTS_UPLOAD)}
-                canReview={can(DOCUMENTS_REVIEW)}
-                onReview={setReviewingDocument}
-                onRename={handleRename}
-                onReindex={handleReindex}
-                onDelete={handleDelete}
+              <ChatPanel
+                messages={messages}
+                asking={asking}
+                onClear={handleClearChat}
+                onExport={handleExportChat}
                 onOpenSidebar={openSidebar}
+                documents={indexedDocuments}
+                pendingCount={documents.length - indexedDocuments.length}
+                knowsDocuments={canReadDocuments}
+                question={question}
+                onQuestionChange={setQuestion}
+                onAsk={handleAsk}
+                onStop={handleStop}
+                mode={mode}
+                onModeChange={setMode}
+                profiles={profiles}
+                profile={profile}
+                onProfileChange={setProfile}
+                multiQuery={multiQuery}
+                onMultiQueryChange={setMultiQuery}
               />
             }
           />
-        )}
-        {pages.users && (
-          <Route
-            path="/utilizadores"
-            element={<UsersPage authConfig={authConfig} currentUserId={session.user.user_id} onOpenSidebar={openSidebar} />}
+          {pages.documents && (
+            <Route
+              path="/documentos"
+              element={
+                <DocumentsPage
+                  documents={documents}
+                  uploadingName={uploadingName}
+                  onUpload={handleUpload}
+                  canUpload={can(DOCUMENTS_UPLOAD)}
+                  canReview={can(DOCUMENTS_REVIEW)}
+                  onReview={setReviewingDocument}
+                  onRename={handleRename}
+                  onReindex={handleReindex}
+                  onDelete={handleDelete}
+                  onOpenSidebar={openSidebar}
+                />
+              }
+            />
+          )}
+          {pages.research && (
+            <>
+              <Route path="/pesquisa" element={<SearchPage onOpenSidebar={openSidebar} />} />
+              <Route path="/descobrir" element={<DiscoverPage onOpenSidebar={openSidebar} />} />
+              <Route path="/projetos" element={<ProjectsPage onOpenSidebar={openSidebar} />} />
+              <Route
+                path="/projetos/:projectId"
+                element={<ProjectPage currentUserId={session.user.user_id} onOpenSidebar={openSidebar} />}
+              />
+            </>
+          )}
+          <Route path="/ficheiros" element={<FilesPage onOpenSidebar={openSidebar} />} />
+          {pages.feedback && <Route path="/avaliacoes" element={<FeedbackPage onOpenSidebar={openSidebar} />} />}
+          {pages.users && (
+            <Route
+              path="/utilizadores"
+              element={<UsersPage authConfig={authConfig} currentUserId={session.user.user_id} onOpenSidebar={openSidebar} />}
+            />
+          )}
+          {pages.settings && (
+            <Route path="/configuracoes" element={<SettingsPage onOpenSidebar={openSidebar} onSaved={notify} />} />
+          )}
+          {authConfig.mode === "local" && (
+            <Route path="/conta" element={<AccountPage user={session.user} onOpenSidebar={openSidebar} onSaved={notify} />} />
+          )}
+          {/* Página sem permissão ou inexistente: volta ao chat. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+
+        {reviewingDocument && (
+          <ReviewPanel
+            documentId={reviewingDocument}
+            onClose={() => handleReviewClosed()}
+            onApproved={handleReviewClosed}
+            canReview={can(DOCUMENTS_REVIEW)}
+            canApprove={can(DOCUMENTS_APPROVE)}
           />
         )}
-        {pages.settings && (
-          <Route path="/configuracoes" element={<SettingsPage onOpenSidebar={openSidebar} onSaved={notify} />} />
-        )}
-        {authConfig.mode === "local" && (
-          <Route path="/conta" element={<AccountPage user={session.user} onOpenSidebar={openSidebar} onSaved={notify} />} />
-        )}
-        {/* Página sem permissão ou inexistente: volta ao chat. */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
 
-      {reviewingDocument && (
-        <ReviewPanel
-          documentId={reviewingDocument}
-          onClose={() => handleReviewClosed()}
-          onApproved={handleReviewClosed}
-          canReview={can(DOCUMENTS_REVIEW)}
-          canApprove={can(DOCUMENTS_APPROVE)}
-        />
-      )}
-
-      <Notice notice={notice} onDismiss={dismissNotice} />
-    </div>
+        <Notice notice={notice} onDismiss={dismissNotice} />
+      </div>
+    </ResearchProvider>
   );
 }
 

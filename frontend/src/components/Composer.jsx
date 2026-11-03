@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { ArrowUp, ChevronDown, Layers, Square, UserCog } from "lucide-react";
+import { ArrowUp, ChevronDown, FolderOpen, Layers, Square, UserCog } from "lucide-react";
+import { useResearch } from "../research/ResearchContext";
 
 const MAX_TEXTAREA_HEIGHT = 200;
 
@@ -19,6 +20,24 @@ function PillSelect({ icon: Icon, value, onChange, title, children }) {
       </select>
       <ChevronDown className="pointer-events-none absolute right-2 size-3.5" />
     </label>
+  );
+}
+
+// Em vez de escolher um documento entre milhares, a pessoa escolhe um dos seus projetos: o chat pesquisa só nos
+// documentos fixados nele.
+function ProjectPill() {
+  const { projects, activeProjectId, setActiveProjectId } = useResearch();
+  const usable = projects.filter((p) => p.document_count > 0);
+  if (!usable.length && !activeProjectId) return null;
+  return (
+    <PillSelect icon={FolderOpen} value={activeProjectId} onChange={setActiveProjectId} title="Onde pesquisar">
+      <option value="">Toda a base</option>
+      {usable.map(({ project, document_count }) => (
+        <option key={project.project_id} value={project.project_id}>
+          {project.title} ({document_count})
+        </option>
+      ))}
+    </PillSelect>
   );
 }
 
@@ -101,6 +120,8 @@ export default function Composer({
       <div className="flex items-end gap-2 px-3 pb-3">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <ModeSwitch mode={mode} onModeChange={onModeChange} />
+
+          <ProjectPill />
 
           {mode === "agent" && profiles.length > 1 && (
             <PillSelect

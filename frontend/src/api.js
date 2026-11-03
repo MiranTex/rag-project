@@ -387,3 +387,91 @@ export function saveSettings(values) {
 export function resetSetting(key) {
   return jsonRequest(`/settings/${key}`, "DELETE", undefined, "Falha ao repor a configuração");
 }
+
+// ---- Área de pesquisa ----
+
+const get = (path, error) => jsonRequest(path, "GET", undefined, error);
+const post = (path, body, error) => jsonRequest(path, "POST", body ?? {}, error);
+const query = (params) => {
+  const search = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+  const text = search.toString();
+  return text ? `?${text}` : "";
+};
+
+export const research = {
+  facets: () => get("/research/facets", "Falha ao carregar os filtros"),
+  search: (body) => post("/research/search", body, "Falha na pesquisa"),
+  document: (id) => get(`/research/documents/${id}`, "Documento não encontrado"),
+  page: (id, page) => get(`/research/documents/${id}/pages/${page}`, "Página não encontrada"),
+  // A janela abre já no clique (senão o browser bloqueia-a como pop-up) e recebe o PDF quando chegar.
+  async openPdf(id, page) {
+    const win = window.open("about:blank", "_blank");
+    try {
+      const res = await apiFetch(`/research/documents/${id}/pdf`);
+      if (!res.ok) throw new Error("PDF não encontrado");
+      const url = URL.createObjectURL(await res.blob());
+      if (win) win.location.href = page ? `${url}#page=${page}` : url;
+      setTimeout(() => URL.revokeObjectURL(url), 120_000);
+    } catch (err) {
+      win?.close();
+      throw err;
+    }
+  },
+  searches: () => get("/research/searches", "Falha ao carregar as pesquisas guardadas"),
+  saveSearch: (body) => post("/research/searches", body, "Falha ao guardar a pesquisa"),
+  deleteSearch: (id) => jsonRequest(`/research/searches/${id}`, "DELETE", undefined, "Falha ao apagar a pesquisa"),
+  newForSearch: (id) => get(`/research/searches/${id}/new`, "Falha ao carregar os documentos novos"),
+  markSearchSeen: (id) => post(`/research/searches/${id}/seen`, {}, "Falha ao marcar como vista"),
+  map: (body) => post("/research/map", body, "Falha ao gerar o mapa do tema"),
+  gaps: (body) => post("/research/gaps", body, "Falha ao procurar lacunas"),
+  async analyzeText({ text, file, projectId }) {
+    const form = new FormData();
+    if (file) form.append("file", file);
+    else form.append("text", text);
+    if (projectId) form.append("project_id", projectId);
+    const res = await apiFetch("/research/text-analysis", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao analisar o texto");
+    return data;
+  },
+  checkClaims: (body) => post("/research/check-claims", body, "Falha ao verificar as afirmações"),
+  workTypes: () => get("/research/work-types", "Falha ao carregar os tipos de trabalho"),
+  skeleton: (body) => post("/research/skeleton", body, "Falha ao gerar o esqueleto"),
+  export: (body) => post("/research/export", body, "Falha ao exportar"),
+
+  projects: () => get("/research/projects", "Falha ao carregar os projetos"),
+  createProject: (body) => post("/research/projects", body, "Falha ao criar o projeto"),
+  project: (id) => get(`/research/projects/${id}`, "Projeto não encontrado"),
+  updateProject: (id, body) => jsonRequest(`/research/projects/${id}`, "PATCH", body, "Falha ao guardar o projeto"),
+  deleteProject: (id) => jsonRequest(`/research/projects/${id}`, "DELETE", undefined, "Falha ao apagar o projeto"),
+  addMember: (id, body) => post(`/research/projects/${id}/members`, body, "Falha ao partilhar o projeto"),
+  removeMember: (id, userId) => jsonRequest(`/research/projects/${id}/members/${userId}`, "DELETE", undefined, "Falha ao remover"),
+  pin: (id, documentId) => post(`/research/projects/${id}/documents/${documentId}`, {}, "Falha ao fixar o documento"),
+  unpin: (id, documentId) =>
+    jsonRequest(`/research/projects/${id}/documents/${documentId}`, "DELETE", undefined, "Falha ao retirar o documento"),
+  items: (id, params = {}) => get(`/research/projects/${id}/items${query(params)}`, "Falha ao carregar o caderno"),
+  addItem: (id, body) => post(`/research/projects/${id}/items`, body, "Falha ao guardar no caderno"),
+  updateItem: (id, itemId, body) => jsonRequest(`/research/projects/${id}/items/${itemId}`, "PATCH", body, "Falha ao guardar"),
+  deleteItem: (id, itemId) => jsonRequest(`/research/projects/${id}/items/${itemId}`, "DELETE", undefined, "Falha ao apagar"),
+  comments: (id) => get(`/research/projects/${id}/comments`, "Falha ao carregar os comentários"),
+  addComment: (id, body) => post(`/research/projects/${id}/comments`, body, "Falha ao comentar"),
+  deleteComment: (id, commentId) =>
+    jsonRequest(`/research/projects/${id}/comments/${commentId}`, "DELETE", undefined, "Falha ao apagar o comentário"),
+  matrix: (id) => get(`/research/projects/${id}/matrix`, "Falha ao carregar a matriz"),
+  saveMatrix: (id, body) => jsonRequest(`/research/projects/${id}/matrix`, "PUT", body, "Falha ao guardar a matriz"),
+  fillMatrix: (id, body) => post(`/research/projects/${id}/matrix/fill`, body, "Falha ao preencher a matriz"),
+  bibliography: (id, style) => get(`/research/projects/${id}/bibliography${query({ style })}`, "Falha ao gerar a bibliografia"),
+  stateOfArt: (id, body) => post(`/research/projects/${id}/state-of-the-art`, body, "Falha ao gerar o estado da arte"),
+};
+
+export function sendFeedback(body) {
+  return jsonRequest("/feedback", "POST", body, "Falha ao enviar a avaliação");
+}
+
+export function listFeedback(rating) {
+  return jsonRequest(`/feedback${query({ rating })}`, "GET", undefined, "Falha ao carregar as avaliações");
+}
+
+export function listExports() {
+  return jsonRequest("/exports", "GET", undefined, "Falha ao listar os ficheiros");
+}

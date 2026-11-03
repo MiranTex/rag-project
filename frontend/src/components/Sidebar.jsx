@@ -1,7 +1,12 @@
 import { NavLink } from "react-router-dom";
 import {
+  Compass,
   FileText,
+  FolderOpen,
+  Files,
   LogOut,
+  Search,
+  ThumbsUp,
   MessageSquare,
   Monitor,
   Moon,
@@ -57,7 +62,7 @@ function NavItem({ to, icon: Icon, label, badge, onNavigate }) {
   return (
     <NavLink
       to={to}
-      end
+      end={to === "/"}
       onClick={onNavigate}
       className={({ isActive }) =>
         `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm ${
@@ -123,10 +128,19 @@ export default function Sidebar({
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
           <NavItem to="/" icon={MessageSquare} label="Chat" onNavigate={onClose} />
+          {pages.research && (
+            <>
+              <NavItem to="/pesquisa" icon={Search} label="Pesquisa" onNavigate={onClose} />
+              <NavItem to="/descobrir" icon={Compass} label="Descobrir" onNavigate={onClose} />
+              <NavItem to="/projetos" icon={FolderOpen} label="Projetos" onNavigate={onClose} />
+            </>
+          )}
+          <NavItem to="/ficheiros" icon={Files} label="Ficheiros" onNavigate={onClose} />
           {pages.documents && (
             <NavItem to="/documentos" icon={FileText} label="Documentos" badge={attentionCount} onNavigate={onClose} />
           )}
           {pages.users && <NavItem to="/utilizadores" icon={Users} label="Utilizadores" onNavigate={onClose} />}
+          {pages.feedback && <NavItem to="/avaliacoes" icon={ThumbsUp} label="Avaliações" onNavigate={onClose} />}
           {pages.settings && <NavItem to="/configuracoes" icon={Settings} label="Configurações" onNavigate={onClose} />}
         </nav>
 

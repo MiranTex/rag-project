@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { AlertCircle, Check, ChevronRight, Copy, FileText } from "lucide-react";
+import { AlertCircle, BookmarkPlus, Check, ChevronRight, Copy, FileText, ThumbsDown, ThumbsUp } from "lucide-react";
+import { sendFeedback } from "../api";
+import { useResearch } from "../research/ResearchContext";
 import AgentSteps from "./AgentSteps";
 import ExportLinks from "./ExportLinks";
 import Markdown from "./Markdown";
@@ -50,6 +52,77 @@ function CopyButton({ text }) {
     >
       {copied ? <Check className="size-4 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-4" />}
     </button>
+  );
+}
+
+// 👍/👎 na resposta; o 👎 pede o motivo (opcional), que é o que mais ajuda a perceber o que falhou.
+function Feedback({ msg, sources }) {
+  const [given, setGiven] = useState(msg.feedback || 0);
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
+
+  async function send(rating, why = "") {
+    setGiven(rating);
+    setAsking(false);
+    try {
+      await sendFeedback({
+        rating,
+        reason: why,
+        question: msg.question,
+        answer: msg.answer,
+        mode: msg.mode || "agent",
+        sources: sources.map(({ document_id, filename, page }) => ({ document_id, filename, page })),
+        project_id: msg.projectId || null,
+      });
+    } catch {
+      setGiven(0);
+    }
+  }
+
+  const button = "rounded-md p-1.5 hover:bg-stone-100 dark:hover:bg-stone-800";
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Boa resposta"
+        title="Boa resposta"
+        disabled={!!given}
+        onClick={() => send(1)}
+        className={`${button} ${given === 1 ? "text-emerald-600" : "text-stone-400 dark:text-stone-500"}`}
+      >
+        <ThumbsUp className="size-4" />
+      </button>
+      <button
+        type="button"
+        aria-label="Má resposta"
+        title="Má resposta"
+        disabled={!!given}
+        onClick={() => setAsking(true)}
+        className={`${button} ${given === -1 ? "text-red-600" : "text-stone-400 dark:text-stone-500"}`}
+      >
+        <ThumbsDown className="size-4" />
+      </button>
+      {asking && (
+        <form
+          className="flex w-full gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send(-1, reason.trim());
+          }}
+        >
+          <input
+            autoFocus
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="O que falhou? (opcional: resposta errada, fonte errada, incompleta…)"
+            className="flex-1 rounded-lg border border-stone-300 bg-white px-2.5 py-1 text-xs outline-none dark:border-stone-700 dark:bg-stone-900"
+          />
+          <button type="submit" className="rounded-lg bg-stone-800 px-2.5 py-1 text-xs text-white dark:bg-stone-200 dark:text-stone-900">
+            Enviar
+          </button>
+        </form>
+      )}
+    </>
   );
 }
 
@@ -119,6 +192,7 @@ function RetrievalDetails({ msg }) {
 }
 
 export default function Message({ msg, pending }) {
+  const { openReader, saveItem } = useResearch();
   const isAgent = msg.mode === "agent";
   const isError = msg.answer?.startsWith("Erro:");
   const sources = uniqueSources(msg.sources);
@@ -157,16 +231,40 @@ export default function Message({ msg, pending }) {
         {msg.answer && !isError && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <CopyButton text={msg.answer} />
+            {!msg.blocked && (
+              <button
+                type="button"
+                title="Guardar no caderno de um projeto"
+                aria-label="Guardar no projeto"
+                onClick={() =>
+                  saveItem({
+                    kind: "answer",
+                    title: msg.question.slice(0, 200),
+                    text: msg.answer,
+                    source: {
+                      question: msg.question,
+                      sources: sources.map(({ document_id, filename, page }) => ({ document_id, filename, page })),
+                    },
+                  })
+                }
+                className="rounded-md p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:text-stone-500 dark:hover:bg-stone-800 dark:hover:text-stone-300"
+              >
+                <BookmarkPlus className="size-4" />
+              </button>
+            )}
+            {!msg.blocked && <Feedback msg={msg} sources={sources} />}
             {sources.map((source) => (
-              <span
+              <button
+                type="button"
                 key={`${source.filename}#${source.page}`}
-                title={source.text ? source.text.slice(0, 300) : undefined}
-                className="inline-flex max-w-full items-center gap-1 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-2.5 py-0.5 text-xs text-stone-600 dark:text-stone-400"
+                title={source.text ? source.text.slice(0, 300) : "Abrir no leitor"}
+                onClick={() => source.document_id && openReader(source)}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-2.5 py-0.5 text-xs text-stone-600 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-600"
               >
                 <FileText className="size-3 shrink-0 text-stone-400 dark:text-stone-500" />
                 <span className="truncate">{source.filename}</span>
                 <span className="shrink-0 text-stone-400 dark:text-stone-500">p. {source.page}</span>
-              </span>
+              </button>
             ))}
           </div>
         )}
