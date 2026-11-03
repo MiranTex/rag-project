@@ -94,7 +94,7 @@ export default function Sidebar({
     <>
       {open && <div className="fixed inset-0 z-30 bg-stone-900/30 md:hidden" onClick={onClose} />}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950 transition-transform md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950 transition-transform md:static md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
