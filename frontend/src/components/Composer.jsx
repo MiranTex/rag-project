@@ -57,6 +57,7 @@ export default function Composer({
   documents,
   selectedDocument,
   onSelectDocument,
+  canSelectDocument,
   profiles,
   profile,
   onProfileChange,
@@ -105,14 +106,16 @@ export default function Composer({
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <ModeSwitch mode={mode} onModeChange={onModeChange} />
 
-          <PillSelect icon={FileText} value={selectedDocument} onChange={onSelectDocument} title="Onde pesquisar">
-            <option value="">Todos os documentos</option>
-            {documents.map((doc) => (
-              <option key={doc.document_id} value={doc.document_id}>
-                {doc.filename}
-              </option>
-            ))}
-          </PillSelect>
+          {canSelectDocument && (
+            <PillSelect icon={FileText} value={selectedDocument} onChange={onSelectDocument} title="Onde pesquisar">
+              <option value="">Todos os documentos</option>
+              {documents.map((doc) => (
+                <option key={doc.document_id} value={doc.document_id}>
+                  {doc.filename}
+                </option>
+              ))}
+            </PillSelect>
+          )}
 
           {mode === "agent" && profiles.length > 1 && (
             <PillSelect

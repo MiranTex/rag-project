@@ -5,18 +5,24 @@ import {
   askQuestionStream,
   deleteDocument,
   getAgentProfiles,
+  getAuthConfig,
   getDocuments,
   getHealth,
+  getMe,
+  hasToken,
+  onUnauthorized,
+  setToken,
   reindexDocument,
   renameDocument,
   uploadDocument,
 } from "./api";
 import ChatPanel from "./components/ChatPanel";
+import Login from "./components/Login";
 import ReviewPanel from "./components/ReviewPanel";
 import Sidebar from "./components/Sidebar";
 import { useTheme } from "./theme";
 
-const CHAT_STORAGE_KEY = "rag-study-chat-history";
+const CHAT_STORAGE_PREFIX = "rag-study-chat-history";
 const AGENT_HISTORY_TURNS = 6;
 
 function isAbort(err) {
@@ -59,7 +65,19 @@ function Notice({ notice, onDismiss }) {
   );
 }
 
-export default function App() {
+// Permissões do backend (backend/auth/permissions.py).
+const DOCUMENTS_READ = "documents:read";
+const DOCUMENTS_UPLOAD = "documents:upload";
+const DOCUMENTS_REVIEW = "documents:review";
+const DOCUMENTS_APPROVE = "documents:approve";
+const CHAT_SELECT_DOCUMENT = "chat:select_document";
+
+function Workspace({ session, onLogout }) {
+  const can = (permission) => session.permissions.includes(permission);
+  const canReadDocuments = can(DOCUMENTS_READ);
+  const canSelectDocument = can(CHAT_SELECT_DOCUMENT);
+  // Cada utilizador tem a sua conversa guardada no browser.
+  const CHAT_STORAGE_KEY = `${CHAT_STORAGE_PREFIX}:${session.user.user_id}`;
   const [health, setHealth] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [selectedDocument, setSelectedDocument] = useState("");
@@ -130,9 +148,10 @@ export default function App() {
   }
 
   async function refreshData() {
+    // Quem só usa o chat não vê a lista de documentos.
     const [healthData, docsData] = await Promise.all([
       getHealth().catch(() => ({ offline: true })),
-      getDocuments(),
+      canReadDocuments ? getDocuments() : Promise.resolve([]),
     ]);
     setHealth(healthData);
     setDocuments(docsData);
@@ -172,7 +191,7 @@ export default function App() {
         {
           question: cleanQuestion,
           profile: profile || null,
-          document_id: selectedDocument || null,
+          document_id: (canSelectDocument && selectedDocument) || null,
           history,
         },
         ({ event, data }) => {
@@ -285,7 +304,7 @@ export default function App() {
       await askQuestionStream(
         {
           question: cleanQuestion,
-          document_id: selectedDocument || null,
+          document_id: (canSelectDocument && selectedDocument) || null,
           include_debug: true,
           multi_query: multiQuery,
         },
@@ -458,6 +477,11 @@ export default function App() {
         health={health}
         theme={theme}
         onThemeChange={setTheme}
+        canReadDocuments={canReadDocuments}
+        canUpload={can(DOCUMENTS_UPLOAD)}
+        canReview={can(DOCUMENTS_REVIEW)}
+        user={session.user}
+        onLogout={onLogout}
       />
 
       <ChatPanel
@@ -468,6 +492,8 @@ export default function App() {
         onOpenSidebar={() => setSidebarOpen(true)}
         documents={indexedDocuments}
         pendingCount={documents.length - indexedDocuments.length}
+        knowsDocuments={canReadDocuments}
+        canSelectDocument={canSelectDocument}
         selectedDocument={selectedDocument}
         onSelectDocument={setSelectedDocument}
         question={question}
@@ -488,10 +514,58 @@ export default function App() {
           documentId={reviewingDocument}
           onClose={() => handleReviewClosed()}
           onApproved={handleReviewClosed}
+          canReview={can(DOCUMENTS_REVIEW)}
+          canApprove={can(DOCUMENTS_APPROVE)}
         />
       )}
 
       <Notice notice={notice} onDismiss={dismissNotice} />
     </div>
   );
+}
+
+export default function App() {
+  // undefined: a verificar a sessão; null: sem sessão (mostra o login).
+  const [session, setSession] = useState(undefined);
+  const [authMode, setAuthMode] = useState("local");
+  const [loginMessage, setLoginMessage] = useState("");
+
+  useEffect(() => {
+    onUnauthorized(() => {
+      setLoginMessage("A sessão terminou. Entra de novo.");
+      setSession(null);
+    });
+    getAuthConfig()
+      .then((config) => setAuthMode(config.mode))
+      .catch(() => {});
+    if (!hasToken()) {
+      setSession(null);
+      return;
+    }
+    getMe()
+      .then(setSession)
+      .catch(() => setSession(null));
+  }, []);
+
+  function handleLogout() {
+    setToken(null);
+    setLoginMessage("");
+    setSession(null);
+  }
+
+  if (session === undefined) return null;
+  if (!session) {
+    return (
+      <Login
+        mode={authMode}
+        message={loginMessage}
+        onLoggedIn={(info) => {
+          setLoginMessage("");
+          setSession(info);
+        }}
+      />
+    );
+  }
+  // key: ao trocar de utilizador, o estado (conversa, documentos) começa do zero.
+  return <Workspace key={session.user.user_id} session={session} onLogout={handleLogout} />;
 }

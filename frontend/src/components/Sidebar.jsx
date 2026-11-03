@@ -3,6 +3,7 @@ import {
   AlertCircle,
   FileText,
   Loader2,
+  LogOut,
   MoreHorizontal,
   Pencil,
   Search,
@@ -76,7 +77,7 @@ function UploadDropzone({ uploading, onUpload }) {
   );
 }
 
-function DocumentMenu({ doc, busy, onReview, onRename, onReindex, onDelete, onClose }) {
+function DocumentMenu({ doc, busy, canUpload, canReview, onReview, onRename, onReindex, onDelete, onClose }) {
   const ref = useRef(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useClickOutside(ref, onClose, true);
@@ -97,18 +98,24 @@ function DocumentMenu({ doc, busy, onReview, onRename, onReindex, onDelete, onCl
               {doc.status === "pending_review" ? "Rever texto" : "Ver texto extraído"}
             </button>
           )}
-          <button type="button" className={item} onClick={() => onRename(doc.document_id)}>
-            <Pencil className="size-4 text-stone-500 dark:text-stone-400" />
-            Renomear
-          </button>
-          <button type="button" className={item} onClick={() => onReindex(doc.document_id)}>
-            <RotateCcw className="size-4 text-stone-500 dark:text-stone-400" />
-            Extrair de novo
-          </button>
-          <div className="my-1 h-px bg-stone-100 dark:bg-stone-800" />
+          {canReview && (
+            <button type="button" className={item} onClick={() => onRename(doc.document_id)}>
+              <Pencil className="size-4 text-stone-500 dark:text-stone-400" />
+              Renomear
+            </button>
+          )}
+          {canUpload && (
+            <>
+              <button type="button" className={item} onClick={() => onReindex(doc.document_id)}>
+                <RotateCcw className="size-4 text-stone-500 dark:text-stone-400" />
+                Extrair de novo
+              </button>
+              <div className="my-1 h-px bg-stone-100 dark:bg-stone-800" />
+            </>
+          )}
         </>
       )}
-      {confirmDelete ? (
+      {!canUpload ? null : confirmDelete ? (
         <button
           type="button"
           className={`${item} bg-red-50 dark:bg-red-950/40 font-medium text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-950/60`}
@@ -175,7 +182,7 @@ function RenameInput({ doc, onRename, onDone }) {
   );
 }
 
-function DocumentItem({ doc, onReview, onRename, onReindex, onDelete }) {
+function DocumentItem({ doc, canUpload, canReview, onReview, onRename, onReindex, onDelete }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const pending = doc.status === "pending_review";
@@ -255,6 +262,8 @@ function DocumentItem({ doc, onReview, onRename, onReindex, onDelete }) {
         <DocumentMenu
           doc={doc}
           busy={busy}
+          canUpload={canUpload}
+          canReview={canReview}
           onReview={act(onReview)}
           onRename={() => {
             setMenuOpen(false);
@@ -323,6 +332,11 @@ export default function Sidebar({
   health,
   theme,
   onThemeChange,
+  canReadDocuments,
+  canUpload,
+  canReview,
+  user,
+  onLogout,
 }) {
   const [query, setQuery] = useState("");
   const terms = normalize(query).split(/\s+/).filter(Boolean);
@@ -336,7 +350,7 @@ export default function Sidebar({
   const processing = visible.filter((d) => d.status === "extracting" || d.status === "indexing");
   const pending = visible.filter((d) => d.status === "pending_review" || d.status === "failed");
   const indexed = visible.filter((d) => d.status === "indexed");
-  const itemProps = { onReview, onRename, onReindex, onDelete };
+  const itemProps = { canUpload, canReview, onReview, onRename, onReindex, onDelete };
 
   return (
     <>
@@ -369,11 +383,16 @@ export default function Sidebar({
           </div>
         </div>
 
-        <div className="px-3">
-          <UploadDropzone uploading={!!uploadingName} onUpload={onUpload} />
-        </div>
+        {canUpload && (
+          <div className="px-3">
+            <UploadDropzone uploading={!!uploadingName} onUpload={onUpload} />
+          </div>
+        )}
 
-        {documents.length > 1 && (
+        {/* Quem só usa o chat não vê a lista de documentos. */}
+        {!canReadDocuments && <div className="flex-1" />}
+
+        {canReadDocuments && documents.length > 1 && (
           <label className="relative mx-3 mt-3 block">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-stone-400" />
             <input
@@ -387,54 +406,71 @@ export default function Sidebar({
           </label>
         )}
 
-        <nav className="mt-4 flex-1 space-y-5 overflow-y-auto px-2 pb-4">
-          {uploadingName && (
-            <div className="flex items-center gap-2.5 px-2.5 text-sm text-stone-600 dark:text-stone-400">
-              <Loader2 className="size-4 shrink-0 animate-spin" />
-              <span className="min-w-0">
-                <span className="block truncate">{uploadingName}</span>
-                <span className="block text-xs text-stone-500 dark:text-stone-400">A enviar…</span>
-              </span>
-            </div>
-          )}
-
-          {processing.length > 0 && (
-            <section>
-              <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Em processamento</h2>
-              <ul>
-                {processing.map((doc) => (
-                  <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {pending.length > 0 && (
-            <section>
-              <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Precisa de atenção</h2>
-              <ul>
-                {pending.map((doc) => (
-                  <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <section>
-            <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Documentos</h2>
-            {indexed.length ? (
-              <ul>
-                {indexed.map((doc) => (
-                  <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />
-                ))}
-              </ul>
-            ) : (
-              <p className="px-2.5 text-sm text-stone-500 dark:text-stone-400">
-                {terms.length ? "Nenhum documento corresponde à pesquisa." : "Nenhum documento indexado."}
-              </p>
+        {canReadDocuments && (
+          <nav className="mt-4 flex-1 space-y-5 overflow-y-auto px-2 pb-4">
+            {uploadingName && (
+              <div className="flex items-center gap-2.5 px-2.5 text-sm text-stone-600 dark:text-stone-400">
+                <Loader2 className="size-4 shrink-0 animate-spin" />
+                <span className="min-w-0">
+                  <span className="block truncate">{uploadingName}</span>
+                  <span className="block text-xs text-stone-500 dark:text-stone-400">A enviar…</span>
+                </span>
+              </div>
             )}
-          </section>
-        </nav>
+
+            {processing.length > 0 && (
+              <section>
+                <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Em processamento</h2>
+                <ul>
+                  {processing.map((doc) => (
+                    <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {pending.length > 0 && (
+              <section>
+                <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Precisa de atenção</h2>
+                <ul>
+                  {pending.map((doc) => (
+                    <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            <section>
+              <h2 className="px-2.5 pb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Documentos</h2>
+              {indexed.length ? (
+                <ul>
+                  {indexed.map((doc) => (
+                    <DocumentItem key={doc.document_id} doc={doc} {...itemProps} />
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-2.5 text-sm text-stone-500 dark:text-stone-400">
+                  {terms.length ? "Nenhum documento corresponde à pesquisa." : "Nenhum documento indexado."}
+                </p>
+              )}
+            </section>
+          </nav>
+        )}
+
+        <div className="flex items-center gap-2 border-t border-stone-200 dark:border-stone-800 px-4 py-2.5 text-sm">
+          <span className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300" title={user.username}>
+            {user.display_name || user.username}
+          </span>
+          <button
+            type="button"
+            onClick={onLogout}
+            title="Sair"
+            aria-label="Sair"
+            className="rounded-md p-1.5 text-stone-500 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-700 hover:text-stone-900 dark:hover:text-stone-100"
+          >
+            <LogOut className="size-4" />
+          </button>
+        </div>
 
         <footer className="flex items-center gap-4 border-t border-stone-200 dark:border-stone-800 px-4 py-3 text-xs text-stone-500 dark:text-stone-400">
           <HealthDot label="API" ok={health ? !health.offline : undefined} />

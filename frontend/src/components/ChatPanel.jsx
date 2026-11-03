@@ -3,7 +3,17 @@ import { Download, Menu, Trash2 } from "lucide-react";
 import Composer from "./Composer";
 import Message from "./Message";
 
-function EmptyState({ documentCount, pendingCount }) {
+function EmptyState({ documentCount, pendingCount, knowsDocuments }) {
+  if (!knowsDocuments) {
+    return (
+      <div className="text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">O que queres saber?</h1>
+        <p className="mt-2 text-stone-500 dark:text-stone-400">
+          As respostas vêm dos documentos da base de conhecimento, com a página de onde saiu cada informação.
+        </p>
+      </div>
+    );
+  }
   if (documentCount === 0) {
     return (
       <div className="text-center">
@@ -35,6 +45,7 @@ export default function ChatPanel({
   onOpenSidebar,
   documents,
   pendingCount,
+  knowsDocuments,
   selectedDocument,
   ...composerProps
 }) {
@@ -70,7 +81,7 @@ export default function ChatPanel({
           <Menu className="size-5" />
         </button>
         <p className="min-w-0 truncate text-sm text-stone-500 dark:text-stone-400">
-          {scope ? (
+          {!knowsDocuments ? null : scope ? (
             <>
               A pesquisar em <span className="font-medium text-stone-800 dark:text-stone-200">{scope.filename}</span>
             </>
@@ -114,7 +125,7 @@ export default function ChatPanel({
       {empty ? (
         <div className="flex flex-1 flex-col items-center justify-center px-4 pb-[12vh]">
           <div className="w-full max-w-2xl space-y-6">
-            <EmptyState documentCount={documents.length} pendingCount={pendingCount} />
+            <EmptyState documentCount={documents.length} pendingCount={pendingCount} knowsDocuments={knowsDocuments} />
             {composer}
           </div>
         </div>

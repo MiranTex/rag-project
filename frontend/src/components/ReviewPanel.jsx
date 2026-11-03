@@ -200,7 +200,7 @@ function NameRow({ doc, suggestedName, busy, onRename }) {
   );
 }
 
-export default function ReviewPanel({ documentId, onClose, onApproved }) {
+export default function ReviewPanel({ documentId, onClose, onApproved, canReview, canApprove }) {
   const [extraction, setExtraction] = useState(null);
   const [error, setError] = useState("");
   const [working, setWorking] = useState("A carregar…");
@@ -275,7 +275,10 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
       JSON.stringify(fromDraft(toDraft(extraction.metadata), typeOf(extraction.metadata.document_type)));
   const doc = extraction?.document;
   const pages = extraction?.pages || [];
-  const readOnly = doc?.status !== "pending_review";
+  const pending = doc?.status === "pending_review";
+  // Corrigir texto e ficha exige documents:review; aprovar exige documents:approve.
+  const readOnly = !pending || !canReview;
+  const showApprove = pending && canApprove && !!doc;
   const visiblePages = onlyAlerts ? pages.filter((p) => p.alerts.length) : pages;
   const includedWithText = pages.filter((p) => !p.excluded && p.text.trim()).length;
   const pagesWithAlerts = pages.filter((p) => p.alerts.length && !p.excluded).length;
@@ -291,7 +294,7 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
         <header className="flex items-start gap-3 border-b border-stone-200 dark:border-stone-800 px-5 py-4">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-stone-500 dark:text-stone-400">
-              {readOnly ? "Texto indexado" : "Rever antes de indexar"}
+              {pending ? "Rever antes de indexar" : "Texto indexado"}
             </p>
             <h2 id="review-title" className="truncate text-lg font-semibold" title={doc?.title || doc?.filename}>
               {doc?.title || doc?.filename || "…"}
@@ -406,7 +409,7 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
           )}
         </div>
 
-        {(error || (!readOnly && doc)) && (
+        {(error || (doc && (!readOnly || showApprove))) && (
           <footer className="flex flex-wrap items-center gap-3 border-t border-stone-200 dark:border-stone-800 px-5 py-3">
             {error ? (
               <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
@@ -420,7 +423,7 @@ export default function ReviewPanel({ documentId, onClose, onApproved }) {
                 {includedWithText === 1 ? "1 página vai ser indexada." : `${includedWithText} páginas vão ser indexadas.`}
               </p>
             )}
-            {!readOnly && doc && (
+            {showApprove && (
               <button
                 type="button"
                 onClick={handleApprove}
