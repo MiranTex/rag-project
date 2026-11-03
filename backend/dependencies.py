@@ -6,14 +6,21 @@ from sqlalchemy import Engine
 from backend.agent.guard import ScopeGuard
 from backend.auth.authenticators import Authenticator, build_authenticator
 from backend.agent.tools import ToolRegistry, build_registry
-from backend.config import get_settings
-from backend.repositories.contracts import DocumentRepository, ExtractionRepository, JobQueue, UserRepository
+from backend.config import get_env_settings, get_settings, install_settings_source, on_settings_change
+from backend.repositories.contracts import (
+    DocumentRepository,
+    ExtractionRepository,
+    JobQueue,
+    SettingsRepository,
+    UserRepository,
+)
 from backend.repositories.database import upgrade_database
 from backend.repositories.legacy_import import import_legacy_json
 from backend.repositories.sql import (
     SqlDocumentRepository,
     SqlExtractionRepository,
     SqlJobQueue,
+    SqlSettingsRepository,
     SqlUserRepository,
     create_db_engine,
 )
@@ -30,7 +37,7 @@ from backend.services.vector_store import VectorStore
 @lru_cache(maxsize=1)
 def get_database() -> Engine:
     """Engine da base de dados, com o esquema atualizado e os dados JSON antigos importados (uma vez)."""
-    url = get_settings().database_url
+    url = get_env_settings().database_url
     upgrade_database(url)
     engine = create_db_engine(url)
     import_legacy_json(SqlDocumentRepository(engine), SqlExtractionRepository(engine))
@@ -50,6 +57,17 @@ def get_job_queue() -> JobQueue:
 @lru_cache(maxsize=1)
 def get_users() -> UserRepository:
     return SqlUserRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_settings_repository() -> SettingsRepository:
+    return SqlSettingsRepository(get_database())
+
+
+def install_settings_overrides() -> None:
+    """Liga as configurações alteradas na aplicação (base de dados) a get_settings(). Corre no arranque da API
+    e do worker; sem isto (por exemplo nos testes) valem só as do .env."""
+    install_settings_source(lambda: get_settings_repository().load())
 
 
 @lru_cache(maxsize=1)
@@ -188,3 +206,8 @@ def get_utility_llm() -> LMStudioClient:
 @lru_cache(maxsize=1)
 def get_scope_guard() -> ScopeGuard:
     return ScopeGuard(get_utility_llm(), get_settings().knowledge_base_description)
+
+
+# Serviços que guardam valores das configurações quando são criados: recriam-se quando estas mudam.
+for _cached in (get_rag_pipeline, get_scope_guard, get_renamer):
+    on_settings_change(_cached.cache_clear)

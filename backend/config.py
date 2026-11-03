@@ -1,8 +1,15 @@
+import json
+import logging
+import threading
+import time
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
-import json
+from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -84,6 +91,8 @@ class Settings(BaseSettings):
     auth_external_default_roles: str = "chat"
     # Origens do frontend autorizadas (separadas por vírgulas); "*" para qualquer uma.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # De quanto em quanto tempo cada processo relê as configurações alteradas na aplicação.
+    overrides_refresh_seconds: float = 5.0
 
     rerank_weights_default: str ='{"vector": 0.45, "lexical": 0.20, "keyword": 0.20, "position": 0.10, "density": 0.05}'
     rerank_weights_grounding: str = '{"vector": 0.35, "lexical": 0.25, "keyword": 0.25, "position": 0.10, "density": 0.05}'
@@ -107,8 +116,61 @@ class Settings(BaseSettings):
 
 
 @lru_cache(maxsize=1)
-def get_settings() -> Settings:
+def get_env_settings() -> Settings:
+    """Só o .env (e variáveis de ambiente): a infraestrutura (base de dados, Chroma, pastas) vem daqui."""
     settings = Settings()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.export_dir).mkdir(parents=True, exist_ok=True)
     return settings
+
+
+# Configurações editáveis na aplicação (ver settings_catalog.py): ficam na base de dados por cima das do .env.
+# Cada processo (API, worker) relê-as no máximo a cada OVERRIDES_REFRESH_SECONDS.
+_overrides_lock = threading.RLock()
+_overrides_source: Callable[[], dict[str, Any]] | None = None
+_change_listeners: list[Callable[[], None]] = []
+_current: dict[str, Any] = {"overrides": None, "settings": None, "checked": 0.0}
+
+
+def install_settings_source(source: Callable[[], dict[str, Any]] | None) -> None:
+    global _overrides_source
+    with _overrides_lock:
+        _overrides_source = source
+        _current.update(overrides=None, settings=None, checked=0.0)
+
+
+def on_settings_change(callback: Callable[[], None]) -> None:
+    """Para serviços que guardam valores das configurações quando são criados (recriam-se quando mudam)."""
+    _change_listeners.append(callback)
+
+
+def refresh_settings() -> Settings:
+    """Relê já as configurações guardadas (depois de as alterar neste processo)."""
+    with _overrides_lock:
+        _current["checked"] = 0.0
+        return get_settings()
+
+
+def get_settings() -> Settings:
+    base = get_env_settings()
+    if _overrides_source is None:
+        return base
+    with _overrides_lock:
+        now = time.monotonic()
+        if _current["settings"] is not None and now - _current["checked"] < base.overrides_refresh_seconds:
+            return _current["settings"]
+        _current["checked"] = now
+        try:
+            overrides = _overrides_source()
+        except Exception:
+            logger.warning("Não foi possível ler as configurações guardadas; ficam as anteriores", exc_info=True)
+            overrides = _current["overrides"] or {}
+        if overrides != _current["overrides"] or _current["settings"] is None:
+            changed = _current["overrides"] is not None
+            # Validadas ao guardar (settings_catalog.validate_setting); aqui só se aplicam.
+            known = {key: value for key, value in overrides.items() if key in Settings.model_fields}
+            _current.update(overrides=overrides, settings=base.model_copy(update=known))
+            if changed:
+                for callback in _change_listeners:
+                    callback()
+        return _current["settings"]

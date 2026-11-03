@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -224,6 +224,8 @@ class CurrentUserInfo(BaseModel):
 
 class AuthConfig(BaseModel):
     mode: Literal["local", "external"]
+    # Login externo com os papéis vindos do token: não se editam nesta aplicação.
+    roles_from_token: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -255,6 +257,25 @@ class UserUpdate(BaseModel):
     roles: list[str] | None = None
     active: bool | None = None
     password: str | None = Field(default=None, min_length=8)
+
+
+class SettingInfo(BaseModel):
+    key: str
+    label: str
+    help: str
+    group: str
+    kind: str
+    choices: list[str] = Field(default_factory=list)
+    minimum: float | None = None
+    maximum: float | None = None
+    value: Any
+    # Valor do .env; overridden: alterado na aplicação (por cima do .env).
+    default: Any
+    overridden: bool
+
+
+class SettingsUpdate(BaseModel):
+    values: dict[str, Any]
 
 
 JobStatus = Literal["queued", "running", "done", "failed"]

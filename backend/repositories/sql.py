@@ -2,6 +2,7 @@
 DATABASE_URL). O esquema evolui com as migrações Alembic em repositories/migrations."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -62,6 +63,15 @@ users = Table(
     Column("external_id", String(255), nullable=True, unique=True),
     Column("password_hash", String(255), nullable=False, default=""),
     Column("created_at", String(40), nullable=False),
+)
+
+app_settings = Table(
+    "app_settings",
+    metadata_obj,
+    Column("key", String(64), primary_key=True),
+    Column("value", JSON, nullable=False),
+    Column("updated_at", String(40), nullable=False),
+    Column("updated_by", String(64), nullable=False, default=""),
 )
 
 extraction_pages = Table(
@@ -205,6 +215,27 @@ class SqlUserRepository:
     def count(self) -> int:
         with self.engine.connect() as conn:
             return conn.execute(select(func.count()).select_from(users)).scalar_one()
+
+
+class SqlSettingsRepository:
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def load(self) -> dict[str, Any]:
+        with self.engine.connect() as conn:
+            return {row.key: row.value for row in conn.execute(select(app_settings.c.key, app_settings.c.value))}
+
+    def save(self, values: dict[str, Any], updated_by: str) -> None:
+        now = _now()
+        with self.engine.begin() as conn:
+            for key, value in values.items():
+                row = {"value": value, "updated_at": now, "updated_by": updated_by}
+                if conn.execute(update(app_settings).where(app_settings.c.key == key).values(**row)).rowcount == 0:
+                    conn.execute(insert(app_settings).values(key=key, **row))
+
+    def delete(self, key: str) -> bool:
+        with self.engine.begin() as conn:
+            return conn.execute(delete(app_settings).where(app_settings.c.key == key)).rowcount > 0
 
 
 class SqlExtractionRepository:

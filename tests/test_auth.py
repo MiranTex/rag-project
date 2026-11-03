@@ -186,7 +186,7 @@ def test_requests_without_a_valid_session_are_rejected(api):
     assert client.get("/auth/me").status_code == 401
     assert client.get("/auth/me", headers={"Authorization": "Bearer lixo"}).status_code == 401
     assert client.post("/auth/login", json={"username": "admin", "password": "errada"}).status_code == 401
-    assert client.get("/auth/config").json() == {"mode": "local"}
+    assert client.get("/auth/config").json() == {"mode": "local", "roles_from_token": False}
 
 
 def test_admin_creates_a_chat_user_who_only_uses_the_chat(api):

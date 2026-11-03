@@ -4,7 +4,7 @@ SQLAlchemy para SQLite/PostgreSQL, JSON legado) são escolhidas em dependencies.
 Qualquer implementação nova tem de passar os testes de contrato (tests/test_repository_contract.py e
 tests/test_job_queue.py)."""
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from backend.models import DocumentInfo, DocumentMetadata, Job, ReviewPage, User
 
@@ -85,3 +85,15 @@ class UserRepository(Protocol):
     def set_password_hash(self, user_id: str, password_hash: str) -> None: ...
 
     def count(self) -> int: ...
+
+
+class SettingsRepository(Protocol):
+    """Configurações alteradas na aplicação: {chave: valor já validado} (ver settings_catalog.py)."""
+
+    def load(self) -> dict[str, Any]: ...
+
+    def save(self, values: dict[str, Any], updated_by: str) -> None: ...
+
+    def delete(self, key: str) -> bool:
+        """Volta ao valor do .env; False se a chave não estava alterada."""
+        ...

@@ -10,13 +10,14 @@ import threading
 
 from backend.api.documents import build_job_runner
 from backend.config import get_settings
-from backend.dependencies import get_job_queue
+from backend.dependencies import get_job_queue, install_settings_overrides
 from backend.services.job_startup import recover_interrupted_jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
 def main() -> None:
+    install_settings_overrides()
     settings = get_settings()
     recover_interrupted_jobs(get_job_queue(), settings.job_stale_minutes)
     runner = build_job_runner()

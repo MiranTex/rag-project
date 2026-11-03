@@ -12,6 +12,7 @@ DOCUMENTS_APPROVE = "documents:approve"  # aprovar para indexação
 CHAT_USE = "chat:use"  # perguntar no chat e ao agente
 CHAT_SELECT_DOCUMENT = "chat:select_document"  # restringir a pergunta a um documento (document_id)
 USERS_MANAGE = "users:manage"  # criar utilizadores e atribuir papéis
+SETTINGS_MANAGE = "settings:manage"  # alterar as configurações da aplicação
 
 ALL_PERMISSIONS = frozenset(
     {
@@ -22,6 +23,7 @@ ALL_PERMISSIONS = frozenset(
         CHAT_USE,
         CHAT_SELECT_DOCUMENT,
         USERS_MANAGE,
+        SETTINGS_MANAGE,
     }
 )
 

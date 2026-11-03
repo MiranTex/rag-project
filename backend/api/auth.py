@@ -25,7 +25,11 @@ def _local_authenticator() -> LocalAuthenticator:
 @router.get("/config", response_model=AuthConfig)
 def auth_config() -> AuthConfig:
     """Público: o frontend decide se mostra o formulário de login ou espera um token do sistema externo."""
-    return AuthConfig(mode=get_settings().auth_mode)
+    settings = get_settings()
+    return AuthConfig(
+        mode=settings.auth_mode,
+        roles_from_token=settings.auth_mode == "external" and bool(settings.auth_external_roles_claim),
+    )
 
 
 @router.post("/login", response_model=TokenResponse)

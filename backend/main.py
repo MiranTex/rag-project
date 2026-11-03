@@ -12,10 +12,11 @@ from backend.api.documents import build_job_runner
 from backend.api.documents import router as documents_router
 from backend.api.exports import router as exports_router
 from backend.api.health import router as health_router
+from backend.api.settings import router as settings_router
 from backend.api.users import router as users_router
 from backend.auth.authenticators import ensure_bootstrap_admin
 from backend.config import get_settings
-from backend.dependencies import get_authenticator, get_job_queue, get_users
+from backend.dependencies import get_authenticator, get_job_queue, get_users, install_settings_overrides
 from backend.services.job_startup import recover_interrupted_jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -25,6 +26,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Workers da fila de extração/indexação dentro da API (INDEXING_WORKERS=0 se correrem à parte)."""
+    install_settings_overrides()
     settings = get_settings()
     ensure_bootstrap_admin(settings, get_users())
     get_authenticator()  # configuração de autenticação inválida falha já no arranque
@@ -52,6 +54,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(settings_router)
 app.include_router(documents_router)
 app.include_router(chat_router)
 app.include_router(agent_router)
