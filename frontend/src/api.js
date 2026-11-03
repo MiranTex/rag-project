@@ -338,3 +338,52 @@ export async function downloadExport(name) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+async function jsonRequest(path, method, body, fallbackError) {
+  const res = await apiFetch(path, {
+    method,
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : fallbackError);
+  return data;
+}
+
+export function changePassword(currentPassword, newPassword) {
+  return jsonRequest(
+    "/auth/password",
+    "PUT",
+    { current_password: currentPassword, new_password: newPassword },
+    "Falha ao mudar a palavra-passe",
+  );
+}
+
+export function listUsers() {
+  return jsonRequest("/users", "GET", undefined, "Falha ao listar utilizadores");
+}
+
+// { papel: [permissões] }
+export function listRoles() {
+  return jsonRequest("/users/roles", "GET", undefined, "Falha ao listar papéis");
+}
+
+export function createUser(user) {
+  return jsonRequest("/users", "POST", user, "Falha ao criar utilizador");
+}
+
+export function updateUser(userId, changes) {
+  return jsonRequest(`/users/${userId}`, "PATCH", changes, "Falha ao guardar utilizador");
+}
+
+export function getSettings() {
+  return jsonRequest("/settings", "GET", undefined, "Falha ao carregar as configurações");
+}
+
+export function saveSettings(values) {
+  return jsonRequest("/settings", "PUT", { values }, "Falha ao guardar as configurações");
+}
+
+export function resetSetting(key) {
+  return jsonRequest(`/settings/${key}`, "DELETE", undefined, "Falha ao repor a configuração");
+}

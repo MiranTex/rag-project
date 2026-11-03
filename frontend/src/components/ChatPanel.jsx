@@ -20,8 +20,8 @@ function EmptyState({ documentCount, pendingCount, knowsDocuments }) {
         <h1 className="text-2xl font-semibold tracking-tight">Ainda não há documentos</h1>
         <p className="mt-2 text-stone-500 dark:text-stone-400">
           {pendingCount > 0
-            ? `Tens ${pendingCount} documento${pendingCount > 1 ? "s" : ""} à espera de revisão na barra lateral.`
-            : "Adiciona um PDF na barra lateral. Depois de rever o texto, podes fazer perguntas sobre ele."}
+            ? `Tens ${pendingCount} documento${pendingCount > 1 ? "s" : ""} à espera de revisão na página Documentos.`
+            : "Adiciona um PDF na página Documentos. Depois de rever o texto, podes fazer perguntas sobre ele."}
         </p>
       </div>
     );
@@ -75,7 +75,7 @@ export default function ChatPanel({
         <button
           type="button"
           onClick={onOpenSidebar}
-          aria-label="Abrir documentos"
+          aria-label="Abrir menu"
           className="rounded-md p-1.5 text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 md:hidden"
         >
           <Menu className="size-5" />

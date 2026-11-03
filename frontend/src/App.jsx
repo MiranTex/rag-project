@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { AlertCircle, CheckCircle2, X } from "lucide-react";
 import {
   askAgentStream,
@@ -20,6 +21,10 @@ import ChatPanel from "./components/ChatPanel";
 import Login from "./components/Login";
 import ReviewPanel from "./components/ReviewPanel";
 import Sidebar from "./components/Sidebar";
+import AccountPage from "./pages/AccountPage";
+import DocumentsPage from "./pages/DocumentsPage";
+import SettingsPage from "./pages/SettingsPage";
+import UsersPage from "./pages/UsersPage";
 import { useTheme } from "./theme";
 
 const CHAT_STORAGE_PREFIX = "rag-study-chat-history";
@@ -71,8 +76,11 @@ const DOCUMENTS_UPLOAD = "documents:upload";
 const DOCUMENTS_REVIEW = "documents:review";
 const DOCUMENTS_APPROVE = "documents:approve";
 const CHAT_SELECT_DOCUMENT = "chat:select_document";
+const USERS_MANAGE = "users:manage";
+const SETTINGS_MANAGE = "settings:manage";
 
-function Workspace({ session, onLogout }) {
+function Workspace({ session, authConfig, onLogout }) {
+  const navigate = useNavigate();
   const can = (permission) => session.permissions.includes(permission);
   const canReadDocuments = can(DOCUMENTS_READ);
   const canSelectDocument = can(CHAT_SELECT_DOCUMENT);
@@ -454,60 +462,94 @@ function Workspace({ session, onLogout }) {
   }
 
   const indexedDocuments = documents.filter((d) => d.status === "indexed");
+  const attentionCount = documents.filter((d) => d.status === "pending_review" || d.status === "failed").length;
+  const pages = { documents: canReadDocuments, users: can(USERS_MANAGE), settings: can(SETTINGS_MANAGE) };
+  const openSidebar = () => setSidebarOpen(true);
 
   return (
     <div className="flex h-full overflow-hidden">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        documents={documents}
-        uploadingName={uploadingName}
-        onUpload={handleUpload}
-        onReview={(id) => {
-          setSidebarOpen(false);
-          setReviewingDocument(id);
-        }}
-        onRename={handleRename}
-        onReindex={handleReindex}
-        onDelete={handleDelete}
         onNewChat={() => {
           handleClearChat();
           setSidebarOpen(false);
+          navigate("/");
         }}
         health={health}
         theme={theme}
         onThemeChange={setTheme}
-        canReadDocuments={canReadDocuments}
-        canUpload={can(DOCUMENTS_UPLOAD)}
-        canReview={can(DOCUMENTS_REVIEW)}
+        pages={pages}
+        attentionCount={attentionCount}
         user={session.user}
+        canChangePassword={authConfig.mode === "local"}
         onLogout={onLogout}
       />
 
-      <ChatPanel
-        messages={messages}
-        asking={asking}
-        onClear={handleClearChat}
-        onExport={handleExportChat}
-        onOpenSidebar={() => setSidebarOpen(true)}
-        documents={indexedDocuments}
-        pendingCount={documents.length - indexedDocuments.length}
-        knowsDocuments={canReadDocuments}
-        canSelectDocument={canSelectDocument}
-        selectedDocument={selectedDocument}
-        onSelectDocument={setSelectedDocument}
-        question={question}
-        onQuestionChange={setQuestion}
-        onAsk={handleAsk}
-        onStop={handleStop}
-        mode={mode}
-        onModeChange={setMode}
-        profiles={profiles}
-        profile={profile}
-        onProfileChange={setProfile}
-        multiQuery={multiQuery}
-        onMultiQueryChange={setMultiQuery}
-      />
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <ChatPanel
+              messages={messages}
+              asking={asking}
+              onClear={handleClearChat}
+              onExport={handleExportChat}
+              onOpenSidebar={openSidebar}
+              documents={indexedDocuments}
+              pendingCount={documents.length - indexedDocuments.length}
+              knowsDocuments={canReadDocuments}
+              canSelectDocument={canSelectDocument}
+              selectedDocument={selectedDocument}
+              onSelectDocument={setSelectedDocument}
+              question={question}
+              onQuestionChange={setQuestion}
+              onAsk={handleAsk}
+              onStop={handleStop}
+              mode={mode}
+              onModeChange={setMode}
+              profiles={profiles}
+              profile={profile}
+              onProfileChange={setProfile}
+              multiQuery={multiQuery}
+              onMultiQueryChange={setMultiQuery}
+            />
+          }
+        />
+        {pages.documents && (
+          <Route
+            path="/documentos"
+            element={
+              <DocumentsPage
+                documents={documents}
+                uploadingName={uploadingName}
+                onUpload={handleUpload}
+                canUpload={can(DOCUMENTS_UPLOAD)}
+                canReview={can(DOCUMENTS_REVIEW)}
+                onReview={setReviewingDocument}
+                onRename={handleRename}
+                onReindex={handleReindex}
+                onDelete={handleDelete}
+                onOpenSidebar={openSidebar}
+              />
+            }
+          />
+        )}
+        {pages.users && (
+          <Route
+            path="/utilizadores"
+            element={<UsersPage authConfig={authConfig} currentUserId={session.user.user_id} onOpenSidebar={openSidebar} />}
+          />
+        )}
+        {pages.settings && (
+          <Route path="/configuracoes" element={<SettingsPage onOpenSidebar={openSidebar} onSaved={notify} />} />
+        )}
+        {authConfig.mode === "local" && (
+          <Route path="/conta" element={<AccountPage user={session.user} onOpenSidebar={openSidebar} onSaved={notify} />} />
+        )}
+        {/* Página sem permissão ou inexistente: volta ao chat. */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
 
       {reviewingDocument && (
         <ReviewPanel
@@ -527,7 +569,7 @@ function Workspace({ session, onLogout }) {
 export default function App() {
   // undefined: a verificar a sessão; null: sem sessão (mostra o login).
   const [session, setSession] = useState(undefined);
-  const [authMode, setAuthMode] = useState("local");
+  const [authConfig, setAuthConfig] = useState({ mode: "local", roles_from_token: false });
   const [loginMessage, setLoginMessage] = useState("");
 
   useEffect(() => {
@@ -536,7 +578,7 @@ export default function App() {
       setSession(null);
     });
     getAuthConfig()
-      .then((config) => setAuthMode(config.mode))
+      .then(setAuthConfig)
       .catch(() => {});
     if (!hasToken()) {
       setSession(null);
@@ -557,7 +599,7 @@ export default function App() {
   if (!session) {
     return (
       <Login
-        mode={authMode}
+        mode={authConfig.mode}
         message={loginMessage}
         onLoggedIn={(info) => {
           setLoginMessage("");
@@ -567,5 +609,5 @@ export default function App() {
     );
   }
   // key: ao trocar de utilizador, o estado (conversa, documentos) começa do zero.
-  return <Workspace key={session.user.user_id} session={session} onLogout={handleLogout} />;
+  return <Workspace key={session.user.user_id} session={session} authConfig={authConfig} onLogout={handleLogout} />;
 }
