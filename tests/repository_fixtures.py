@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import delete
 
 from backend.repositories.database import upgrade_database
+import backend.repositories.research_sql  # noqa: F401  (tabelas da área de pesquisa no metadata_obj)
 from backend.repositories.sql import create_db_engine, metadata_obj
 
 SQL_BACKENDS = ["sqlite", "postgres"]

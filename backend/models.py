@@ -142,6 +142,8 @@ class AskRequest(BaseModel):
     multi_query_n: int = Field(default=3, ge=1, le=6)
     retrieval_mode: Literal["hybrid", "vector", "keyword"] | None = None
     keyword_top_k: int | None = Field(default=None, ge=1, le=50)
+    # Projeto de pesquisa: a pergunta fica limitada aos documentos fixados nele.
+    project_id: str | None = None
 
 
 class SourceChunk(BaseModel):
@@ -189,6 +191,7 @@ class AgentAskRequest(BaseModel):
     question: str = Field(min_length=2)
     profile: str | None = None
     document_id: str | None = None
+    project_id: str | None = None
     history: list[AgentTurn] = Field(default_factory=list, max_length=20)
 
 

@@ -6,6 +6,8 @@ from fastapi.responses import StreamingResponse
 from backend.api.security import require
 from backend.api.sse import sse_event, stop_on_disconnect
 from backend.auth.permissions import CHAT_SELECT_DOCUMENT, CHAT_USE, AuthenticatedUser
+from backend.research.access import project_scope
+from backend.services.search_filters import SearchFilters
 from backend.config import get_settings
 from backend.dependencies import get_rag_pipeline
 from backend.models import AskRequest, AskResponse
@@ -27,6 +29,8 @@ def _validated(payload: AskRequest, user: AuthenticatedUser) -> str:
 @router.post("/ask", response_model=AskResponse)
 def ask_question(payload: AskRequest, user: AuthenticatedUser = Depends(require(CHAT_USE))) -> AskResponse:
     question = _validated(payload, user)
+    scope = project_scope(payload.project_id, user)
+    filters = SearchFilters(document_ids=scope) if scope is not None else None
 
     settings = get_settings()
     top_k = payload.top_k or settings.top_k
@@ -41,6 +45,7 @@ def ask_question(payload: AskRequest, user: AuthenticatedUser = Depends(require(
             n_expansions=payload.multi_query_n,
             retrieval_mode=retrieval_mode,
             keyword_top_k=payload.keyword_top_k,
+            filters=filters,
         )
         return AskResponse(
             answer=answer,
@@ -56,6 +61,7 @@ def ask_question(payload: AskRequest, user: AuthenticatedUser = Depends(require(
             document_id=payload.document_id,
             retrieval_mode=retrieval_mode,
             keyword_top_k=payload.keyword_top_k,
+            filters=filters,
         )
         return AskResponse(
             answer=answer,
@@ -69,6 +75,7 @@ def ask_question(payload: AskRequest, user: AuthenticatedUser = Depends(require(
         document_id=payload.document_id,
         retrieval_mode=retrieval_mode,
         keyword_top_k=payload.keyword_top_k,
+        filters=filters,
     )
     return AskResponse(answer=answer, sources=sources)
 
@@ -76,6 +83,8 @@ def ask_question(payload: AskRequest, user: AuthenticatedUser = Depends(require(
 @router.post("/ask-stream")
 def ask_question_stream(payload: AskRequest, user: AuthenticatedUser = Depends(require(CHAT_USE))) -> StreamingResponse:
     question = _validated(payload, user)
+    scope = project_scope(payload.project_id, user)
+    filters = SearchFilters(document_ids=scope) if scope is not None else None
 
     settings = get_settings()
     top_k = payload.top_k or settings.top_k
@@ -93,6 +102,7 @@ def ask_question_stream(payload: AskRequest, user: AuthenticatedUser = Depends(r
                     n_expansions=payload.multi_query_n,
                     retrieval_mode=retrieval_mode,
                     keyword_top_k=payload.keyword_top_k,
+                    filters=filters,
                 )
                 yield sse_event("sources", {"sources": [src.model_dump() for src in sources]})
                 if payload.include_debug:
@@ -112,6 +122,7 @@ def ask_question_stream(payload: AskRequest, user: AuthenticatedUser = Depends(r
                 document_id=payload.document_id,
                 retrieval_mode=retrieval_mode,
                 keyword_top_k=payload.keyword_top_k,
+                filters=filters,
             )
             yield sse_event("sources", {"sources": [src.model_dump() for src in sources]})
             if payload.include_debug:

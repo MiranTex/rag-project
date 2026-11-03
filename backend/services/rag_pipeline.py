@@ -75,6 +75,7 @@ class RagPipeline:
         document_id: str | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[str, list[SourceChunk]]:
         answer, sources, _ = self.ask_with_debug(
             question=question,
@@ -82,6 +83,7 @@ class RagPipeline:
             document_id=document_id,
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
+            filters=filters,
         )
         return answer, sources
 
@@ -93,6 +95,7 @@ class RagPipeline:
         rerank_weights: dict[str, float] | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[str, list[SourceChunk], list[RetrievalDiagnostic]]:
         user_prompt, sources, diagnostics = self.build_user_prompt_with_debug(
             question=question,
@@ -101,6 +104,7 @@ class RagPipeline:
             rerank_weights=rerank_weights,
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
+            filters=filters,
         )
 
         answer = self.lmstudio_client.chat(SYSTEM_PROMPT, user_prompt)
@@ -202,6 +206,7 @@ class RagPipeline:
         document_id: str | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[str, list[SourceChunk]]:
         user_prompt, sources, _ = self.build_user_prompt_with_debug(
             question=question,
@@ -209,6 +214,7 @@ class RagPipeline:
             document_id=document_id,
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
+            filters=filters,
         )
         return user_prompt, sources
 
@@ -220,6 +226,7 @@ class RagPipeline:
         rerank_weights: dict[str, float] | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[str, list[SourceChunk], list[RetrievalDiagnostic]]:
         sources, diagnostics = self._retrieve_sources(
             question=question,
@@ -228,6 +235,7 @@ class RagPipeline:
             rerank_weights=rerank_weights,
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
+            filters=filters,
         )
 
         context_blocks: list[str] = []
@@ -247,6 +255,7 @@ class RagPipeline:
         document_id: str | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[list[str], list[SourceChunk]]:
         tokens, sources, _ = self.ask_stream_with_debug(
             question=question,
@@ -254,6 +263,7 @@ class RagPipeline:
             document_id=document_id,
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
+            filters=filters,
         )
         return tokens, sources
 
@@ -265,6 +275,7 @@ class RagPipeline:
         rerank_weights: dict[str, float] | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[list[str], list[SourceChunk], list[RetrievalDiagnostic]]:
         user_prompt, sources, diagnostics = self.build_user_prompt_with_debug(
             question=question,
@@ -273,6 +284,7 @@ class RagPipeline:
             rerank_weights=rerank_weights,
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
+            filters=filters,
         )
         tokens = list(self.lmstudio_client.chat_stream(SYSTEM_PROMPT, user_prompt))
         return tokens, sources, diagnostics
@@ -290,6 +302,7 @@ class RagPipeline:
         rerank_weights: dict[str, float] | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[list[SourceChunk], list[RetrievalDiagnostic], list[str]]:
         """Expand the question, retrieve for every variant, deduplicate,
         then rerank the merged candidate pool."""
@@ -297,6 +310,9 @@ class RagPipeline:
         all_queries = [question] + expanded
 
         active_mode = retrieval_mode or self.retrieval_mode_default
+        filters = filters or SearchFilters()
+        if document_id and not filters.document_id:
+            filters = replace(filters, document_id=document_id)
         vector_limit = max(top_k * 2, top_k + 4)
         lexical_limit = keyword_top_k or max(top_k * self.keyword_candidate_multiplier, top_k + 4)
         seen: dict[str, tuple[SourceChunk, float, float]] = {}
@@ -307,7 +323,7 @@ class RagPipeline:
                 results = self.vector_store.query(
                     query_embedding=q_embedding,
                     top_k=vector_limit,
-                    document_id=document_id,
+                    where=filters.to_chroma_where(),
                 )
                 for item in results:
                     meta = item["metadata"]
@@ -319,7 +335,8 @@ class RagPipeline:
                 lexical_results = self.keyword_index.search(
                     query_text=q,
                     top_k=lexical_limit,
-                    document_id=document_id,
+                    document_id=filters.document_id,
+                    predicate=None if filters.is_empty() else filters.matches,
                 )
                 for item in lexical_results:
                     meta = item["metadata"]
@@ -360,6 +377,7 @@ class RagPipeline:
         rerank_weights: dict[str, float] | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[str, list[SourceChunk], list[RetrievalDiagnostic], list[str]]:
         """Full Multi-Query RAG: expand → retrieve → rerank → answer."""
         sources, diagnostics, expanded = self._retrieve_sources_multi_query(
@@ -370,6 +388,7 @@ class RagPipeline:
             rerank_weights=rerank_weights,
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
+            filters=filters,
         )
         context_blocks = [
             f"Documento: {c.filename} | P\u00e1gina: {c.page}\nTrecho: {c.text}"
@@ -389,6 +408,7 @@ class RagPipeline:
         rerank_weights: dict[str, float] | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[list[str], list[SourceChunk], list[RetrievalDiagnostic], list[str]]:
         """Streaming variant of Multi-Query RAG."""
         sources, diagnostics, expanded = self._retrieve_sources_multi_query(
@@ -399,6 +419,7 @@ class RagPipeline:
             rerank_weights=rerank_weights,
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
+            filters=filters,
         )
         context_blocks = [
             f"Documento: {c.filename} | P\u00e1gina: {c.page}\nTrecho: {c.text}"

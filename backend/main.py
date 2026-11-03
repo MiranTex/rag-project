@@ -11,7 +11,10 @@ from backend.api.chat import router as chat_router
 from backend.api.documents import build_job_runner
 from backend.api.documents import router as documents_router
 from backend.api.exports import router as exports_router
+from backend.api.feedback import router as feedback_router
 from backend.api.health import router as health_router
+from backend.api.research import router as research_router
+from backend.api.research_projects import router as research_projects_router
 from backend.api.settings import router as settings_router
 from backend.api.users import router as users_router
 from backend.auth.authenticators import ensure_bootstrap_admin
@@ -55,6 +58,9 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(settings_router)
+app.include_router(research_router)
+app.include_router(research_projects_router)
+app.include_router(feedback_router)
 app.include_router(documents_router)
 app.include_router(chat_router)
 app.include_router(agent_router)

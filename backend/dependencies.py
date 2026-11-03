@@ -10,10 +10,13 @@ from backend.config import get_env_settings, get_settings, install_settings_sour
 from backend.repositories.contracts import (
     DocumentRepository,
     ExtractionRepository,
+    FeedbackRepository,
     JobQueue,
+    ResearchRepository,
     SettingsRepository,
     UserRepository,
 )
+from backend.repositories.research_sql import SqlFeedbackRepository, SqlResearchRepository
 from backend.repositories.database import upgrade_database
 from backend.repositories.legacy_import import import_legacy_json
 from backend.repositories.sql import (
@@ -57,6 +60,16 @@ def get_job_queue() -> JobQueue:
 @lru_cache(maxsize=1)
 def get_users() -> UserRepository:
     return SqlUserRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_research_repository() -> ResearchRepository:
+    return SqlResearchRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_feedback_repository() -> FeedbackRepository:
+    return SqlFeedbackRepository(get_database())
 
 
 @lru_cache(maxsize=1)

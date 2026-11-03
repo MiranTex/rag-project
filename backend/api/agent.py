@@ -23,6 +23,7 @@ from backend.dependencies import (
     get_vector_store,
 )
 from backend.models import AgentAskRequest, AgentProfileInfo
+from backend.research.access import load_project, project_scope
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -63,6 +64,14 @@ def _build_runner(payload: AgentAskRequest, profile: AgentProfile, user: Authent
             f"O utilizador selecionou o documento '{document.filename}' (document_id={document.document_id}); "
             "as pesquisas ficam restringidas a ele por defeito."
         )
+    scope = project_scope(payload.project_id, user)
+    if scope is not None:
+        project, _ = load_project(payload.project_id, user)
+        scope_note = (
+            f"A conversa decorre no projeto de pesquisa '{project.title}'"
+            + (f" (pergunta de investigação: {project.question})" if project.question else "")
+            + f". As pesquisas estão limitadas aos {len(scope)} documento(s) fixados no projeto."
+        )
 
     context = ToolContext(
         pipeline=get_rag_pipeline(),
@@ -75,6 +84,7 @@ def _build_runner(payload: AgentAskRequest, profile: AgentProfile, user: Authent
         document_types=get_document_types(),
         profile_store=get_profile_store(),
         embedding_model=settings.embedding_model,
+        scope_document_ids=scope,
     )
     return AgentRunner(
         llm=get_lmstudio_client(),

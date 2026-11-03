@@ -31,6 +31,8 @@ class ToolContext:
     document_types: DocumentTypes | None = None
     profile_store: VectorStore | None = None
     embedding_model: str = ""
+    # Âmbito de um projeto de pesquisa: as pesquisas das tools ficam limitadas a estes documentos.
+    scope_document_ids: list[str] | None = None
 
 
 @dataclass

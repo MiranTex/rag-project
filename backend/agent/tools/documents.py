@@ -49,6 +49,7 @@ def _build_filters(ctx: ToolContext, params: FilterParams, sections: list[str] |
         raise ToolError(f"Secções desconhecidas: {sorted(unknown_sections)}. Secções: {sorted(_section_keys(ctx))}")
     return SearchFilters(
         document_id=document_id,
+        document_ids=ctx.scope_document_ids,
         document_type=params.document_type,
         year_from=params.year_from,
         year_to=params.year_to,
@@ -72,6 +73,8 @@ class ListDocumentsParams(BaseModel):
 def list_documents(params: ListDocumentsParams, ctx: ToolContext) -> ToolResult:
     # Documentos à espera de revisão ainda não estão no índice.
     docs = [d for d in ctx.registry.list_documents() if d.status == "indexed"]
+    if ctx.scope_document_ids is not None:
+        docs = [d for d in docs if d.document_id in ctx.scope_document_ids]
     documents = []
     for d in docs:
         item = {"document_id": d.document_id, "filename": d.filename, "chunk_count": d.chunk_count}

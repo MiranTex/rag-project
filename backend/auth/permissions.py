@@ -13,6 +13,8 @@ CHAT_USE = "chat:use"  # perguntar no chat e ao agente
 CHAT_SELECT_DOCUMENT = "chat:select_document"  # restringir a pergunta a um documento (document_id)
 USERS_MANAGE = "users:manage"  # criar utilizadores e atribuir papéis
 SETTINGS_MANAGE = "settings:manage"  # alterar as configurações da aplicação
+RESEARCH_USE = "research:use"  # área de pesquisa: projetos, caderno, pesquisa, descobrir e escrever
+FEEDBACK_READ = "feedback:read"  # ver as avaliações das respostas
 
 ALL_PERMISSIONS = frozenset(
     {
@@ -24,10 +26,12 @@ ALL_PERMISSIONS = frozenset(
         CHAT_SELECT_DOCUMENT,
         USERS_MANAGE,
         SETTINGS_MANAGE,
+        RESEARCH_USE,
+        FEEDBACK_READ,
     }
 )
 
-_DOCUMENT_CHAT = {DOCUMENTS_READ, CHAT_USE, CHAT_SELECT_DOCUMENT}
+_DOCUMENT_CHAT = {DOCUMENTS_READ, CHAT_USE, CHAT_SELECT_DOCUMENT, RESEARCH_USE}
 
 ROLES: dict[str, frozenset[str]] = {
     "admin": ALL_PERMISSIONS,
@@ -36,7 +40,7 @@ ROLES: dict[str, frozenset[str]] = {
     "uploader": frozenset(_DOCUMENT_CHAT | {DOCUMENTS_UPLOAD, DOCUMENTS_REVIEW}),
     "reviewer": frozenset(_DOCUMENT_CHAT | {DOCUMENTS_REVIEW, DOCUMENTS_APPROVE}),
     # Só o chat: não vê a lista de documentos nem escolhe um documento (pode pedi-lo por texto ao agente).
-    "chat": frozenset({CHAT_USE}),
+    "chat": frozenset({CHAT_USE, RESEARCH_USE}),
 }
 
 

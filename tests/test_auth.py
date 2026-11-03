@@ -20,7 +20,7 @@ from backend.auth.authenticators import (
     ensure_bootstrap_admin,
 )
 from backend.auth.passwords import hash_password, verify_password
-from backend.auth.permissions import CHAT_USE, DOCUMENTS_APPROVE, DOCUMENTS_UPLOAD, permissions_for
+from backend.auth.permissions import CHAT_USE, DOCUMENTS_APPROVE, DOCUMENTS_UPLOAD, RESEARCH_USE, permissions_for
 from backend.config import Settings
 from backend.models import User
 from backend.repositories.sql import SqlUserRepository
@@ -48,7 +48,7 @@ def test_passwords_are_salted_and_verified():
 
 
 def test_permissions_are_the_union_of_the_roles():
-    assert permissions_for(["chat"]) == {CHAT_USE}
+    assert permissions_for(["chat"]) == {CHAT_USE, RESEARCH_USE}
     uploader_and_reviewer = permissions_for(["uploader", "reviewer"])
     assert {DOCUMENTS_UPLOAD, DOCUMENTS_APPROVE} <= uploader_and_reviewer
     assert permissions_for(["desconhecido"]) == frozenset()
@@ -197,7 +197,7 @@ def test_admin_creates_a_chat_user_who_only_uses_the_chat(api):
     assert client.post("/users", headers=admin, json={"username": "x", "password": "palavra-passe", "roles": ["chefe"]}).status_code == 422
 
     reader = api["login"]("leitor")
-    assert client.get("/auth/me", headers=reader).json()["permissions"] == [CHAT_USE]
+    assert client.get("/auth/me", headers=reader).json()["permissions"] == sorted([CHAT_USE, RESEARCH_USE])
     assert client.get("/users", headers=reader).status_code == 403
     assert client.post("/chat/ask", headers=reader, json={"question": "Qual é o prazo?"}).json()["answer"] == "resposta"
     # Pode perguntar, mas não restringir a pergunta a um documento.

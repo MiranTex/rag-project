@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 @dataclass
 class SearchFilters:
     document_id: str | None = None
+    # Só estes documentos (ex.: os de um projeto de pesquisa). None: sem limite; lista vazia: nenhum documento.
+    document_ids: list[str] | None = None
     document_type: str | None = None
     year_from: int | None = None
     year_to: int | None = None
@@ -14,12 +16,15 @@ class SearchFilters:
     fields: dict[str, str] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
-        return not (self.document_id or self.document_type or self.year_from or self.year_to or self.sections or self.fields)
+        return not (self.document_id or self.document_ids is not None or self.document_type or self.year_from or self.year_to or self.sections or self.fields)
 
     def to_chroma_where(self) -> dict | None:
         conditions: list[dict] = []
         if self.document_id:
             conditions.append({"document_id": self.document_id})
+        if self.document_ids is not None:
+            # O Chroma não aceita $in vazio: um id que não existe dá o mesmo resultado (nada).
+            conditions.append({"document_id": {"$in": list(self.document_ids) or ["__nenhum__"]}})
         if self.document_type:
             conditions.append({"document_type": self.document_type})
         if self.year_from:
@@ -36,6 +41,8 @@ class SearchFilters:
 
     def matches(self, metadata: dict) -> bool:
         if self.document_id and metadata.get("document_id") != self.document_id:
+            return False
+        if self.document_ids is not None and metadata.get("document_id") not in self.document_ids:
             return False
         if self.document_type and metadata.get("document_type") != self.document_type:
             return False
