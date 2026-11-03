@@ -75,7 +75,6 @@ const DOCUMENTS_READ = "documents:read";
 const DOCUMENTS_UPLOAD = "documents:upload";
 const DOCUMENTS_REVIEW = "documents:review";
 const DOCUMENTS_APPROVE = "documents:approve";
-const CHAT_SELECT_DOCUMENT = "chat:select_document";
 const USERS_MANAGE = "users:manage";
 const SETTINGS_MANAGE = "settings:manage";
 
@@ -83,12 +82,10 @@ function Workspace({ session, authConfig, onLogout }) {
   const navigate = useNavigate();
   const can = (permission) => session.permissions.includes(permission);
   const canReadDocuments = can(DOCUMENTS_READ);
-  const canSelectDocument = can(CHAT_SELECT_DOCUMENT);
   // Cada utilizador tem a sua conversa guardada no browser.
   const CHAT_STORAGE_KEY = `${CHAT_STORAGE_PREFIX}:${session.user.user_id}`;
   const [health, setHealth] = useState(null);
   const [documents, setDocuments] = useState([]);
-  const [selectedDocument, setSelectedDocument] = useState("");
   const [notice, setNotice] = useState(null);
   const [uploadingName, setUploadingName] = useState("");
   const [reviewingDocument, setReviewingDocument] = useState(null);
@@ -199,7 +196,6 @@ function Workspace({ session, authConfig, onLogout }) {
         {
           question: cleanQuestion,
           profile: profile || null,
-          document_id: (canSelectDocument && selectedDocument) || null,
           history,
         },
         ({ event, data }) => {
@@ -312,7 +308,6 @@ function Workspace({ session, authConfig, onLogout }) {
       await askQuestionStream(
         {
           question: cleanQuestion,
-          document_id: (canSelectDocument && selectedDocument) || null,
           include_debug: true,
           multi_query: multiQuery,
         },
@@ -420,9 +415,6 @@ function Workspace({ session, authConfig, onLogout }) {
   async function handleDelete(documentId) {
     try {
       const result = await deleteDocument(documentId);
-      if (selectedDocument === documentId) {
-        setSelectedDocument("");
-      }
       notify(result.message);
       await refreshData();
     } catch (err) {
@@ -499,9 +491,6 @@ function Workspace({ session, authConfig, onLogout }) {
               documents={indexedDocuments}
               pendingCount={documents.length - indexedDocuments.length}
               knowsDocuments={canReadDocuments}
-              canSelectDocument={canSelectDocument}
-              selectedDocument={selectedDocument}
-              onSelectDocument={setSelectedDocument}
               question={question}
               onQuestionChange={setQuestion}
               onAsk={handleAsk}

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ArrowUp, ChevronDown, FileText, Layers, Square, UserCog } from "lucide-react";
+import { ArrowUp, ChevronDown, Layers, Square, UserCog } from "lucide-react";
 
 const MAX_TEXTAREA_HEIGHT = 200;
 
@@ -54,10 +54,6 @@ export default function Composer({
   asking,
   mode,
   onModeChange,
-  documents,
-  selectedDocument,
-  onSelectDocument,
-  canSelectDocument,
   profiles,
   profile,
   onProfileChange,
@@ -105,17 +101,6 @@ export default function Composer({
       <div className="flex items-end gap-2 px-3 pb-3">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <ModeSwitch mode={mode} onModeChange={onModeChange} />
-
-          {canSelectDocument && (
-            <PillSelect icon={FileText} value={selectedDocument} onChange={onSelectDocument} title="Onde pesquisar">
-              <option value="">Todos os documentos</option>
-              {documents.map((doc) => (
-                <option key={doc.document_id} value={doc.document_id}>
-                  {doc.filename}
-                </option>
-              ))}
-            </PillSelect>
-          )}
 
           {mode === "agent" && profiles.length > 1 && (
             <PillSelect

@@ -46,12 +46,10 @@ export default function ChatPanel({
   documents,
   pendingCount,
   knowsDocuments,
-  selectedDocument,
   ...composerProps
 }) {
   const streamRef = useRef(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const scope = documents.find((d) => d.document_id === selectedDocument);
 
   useEffect(() => {
     const el = streamRef.current;
@@ -66,7 +64,7 @@ export default function ChatPanel({
 
   const empty = messages.length === 0;
   const composer = (
-    <Composer asking={asking} documents={documents} selectedDocument={selectedDocument} {...composerProps} />
+    <Composer asking={asking} {...composerProps} />
   );
 
   return (
@@ -80,15 +78,6 @@ export default function ChatPanel({
         >
           <Menu className="size-5" />
         </button>
-        <p className="min-w-0 truncate text-sm text-stone-500 dark:text-stone-400">
-          {!knowsDocuments ? null : scope ? (
-            <>
-              A pesquisar em <span className="font-medium text-stone-800 dark:text-stone-200">{scope.filename}</span>
-            </>
-          ) : (
-            "A pesquisar em todos os documentos"
-          )}
-        </p>
         {!empty && (
           <div className="ml-auto flex items-center gap-1">
             <button
