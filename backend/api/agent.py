@@ -1,12 +1,14 @@
 from collections.abc import Iterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.agent.profiles import BLOCKED_MESSAGE, DEFAULT_PROFILE, PROFILES, AgentProfile
 from backend.agent.runner import AgentRunner
 from backend.agent.tools import ToolContext
+from backend.api.security import require
 from backend.api.sse import sse_event, stop_on_disconnect
+from backend.auth.permissions import CHAT_SELECT_DOCUMENT, CHAT_USE, AuthenticatedUser
 from backend.config import get_settings
 from backend.dependencies import (
     get_document_types,
@@ -27,7 +29,7 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 HISTORY_TURNS = 6
 
 
-@router.get("/profiles", response_model=list[AgentProfileInfo])
+@router.get("/profiles", response_model=list[AgentProfileInfo], dependencies=[Depends(require(CHAT_USE))])
 def list_profiles() -> list[AgentProfileInfo]:
     registry = get_tool_registry()
     return [
@@ -48,10 +50,12 @@ def _resolve_profile(payload: AgentAskRequest) -> AgentProfile:
     return profile
 
 
-def _build_runner(payload: AgentAskRequest, profile: AgentProfile) -> AgentRunner:
+def _build_runner(payload: AgentAskRequest, profile: AgentProfile, user: AuthenticatedUser) -> AgentRunner:
     settings = get_settings()
     scope_note = None
     if payload.document_id:
+        if not user.can(CHAT_SELECT_DOCUMENT):
+            raise HTTPException(status_code=403, detail="Sem permissão para escolher um documento.")
         document = get_registry().find_by_id(payload.document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Documento não encontrado.")
@@ -64,7 +68,7 @@ def _build_runner(payload: AgentAskRequest, profile: AgentProfile) -> AgentRunne
         pipeline=get_rag_pipeline(),
         vector_store=get_vector_store(),
         registry=get_registry(),
-        export_store=get_export_store(),
+        export_store=get_export_store().for_owner(user.user_id),
         top_k=settings.top_k,
         default_document_id=payload.document_id,
         extraction_store=get_extraction_store(),
@@ -90,13 +94,13 @@ def _history_messages(payload: AgentAskRequest) -> list[dict]:
 
 
 @router.post("/ask-stream")
-def ask_agent_stream(payload: AgentAskRequest) -> StreamingResponse:
+def ask_agent_stream(payload: AgentAskRequest, user: AuthenticatedUser = Depends(require(CHAT_USE))) -> StreamingResponse:
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Pergunta inválida.")
 
     profile = _resolve_profile(payload)
-    runner = _build_runner(payload, profile)
+    runner = _build_runner(payload, profile, user)
     history = _history_messages(payload)
     guard_enabled = get_settings().guard_enabled
 

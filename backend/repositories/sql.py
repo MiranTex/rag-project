@@ -24,7 +24,7 @@ from sqlalchemy import (
     update,
 )
 
-from backend.models import DocumentInfo, DocumentMetadata, Job, ReviewPage
+from backend.models import DocumentInfo, DocumentMetadata, Job, ReviewPage, User
 
 metadata_obj = MetaData()
 
@@ -46,6 +46,22 @@ documents = Table(
     Column("year", Integer, nullable=True),
     Column("document_type", String(64), nullable=False, default=""),
     Column("error", Text, nullable=False, default=""),
+    Column("uploaded_by", String(64), nullable=False, default=""),
+    Column("approved_by", String(64), nullable=False, default=""),
+    Column("approved_fingerprint", String(64), nullable=False, default=""),
+)
+
+users = Table(
+    "users",
+    metadata_obj,
+    Column("user_id", String(64), primary_key=True),
+    Column("username", String(255), nullable=False, unique=True),
+    Column("display_name", String(255), nullable=False, default=""),
+    Column("roles", JSON, nullable=False),
+    Column("active", Boolean, nullable=False, default=True),
+    Column("external_id", String(255), nullable=True, unique=True),
+    Column("password_hash", String(255), nullable=False, default=""),
+    Column("created_at", String(40), nullable=False),
 )
 
 extraction_pages = Table(
@@ -141,6 +157,54 @@ class SqlDocumentRepository:
     def remove(self, document_id: str) -> bool:
         with self.engine.begin() as conn:
             return conn.execute(delete(documents).where(documents.c.document_id == document_id)).rowcount > 0
+
+
+class SqlUserRepository:
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    @staticmethod
+    def _to_model(row) -> User:
+        return User(**{k: v for k, v in row._mapping.items() if k != "password_hash"})
+
+    def _find(self, condition) -> User | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(select(users).where(condition)).first()
+        return self._to_model(row) if row else None
+
+    def list_users(self) -> list[User]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(select(users).order_by(users.c.username))
+            return [self._to_model(row) for row in rows]
+
+    def find_by_id(self, user_id: str) -> User | None:
+        return self._find(users.c.user_id == user_id)
+
+    def find_by_username(self, username: str) -> User | None:
+        return self._find(users.c.username == username)
+
+    def find_by_external_id(self, external_id: str) -> User | None:
+        return self._find(users.c.external_id == external_id)
+
+    def add_or_replace(self, user: User) -> None:
+        values = user.model_dump()
+        with self.engine.begin() as conn:
+            result = conn.execute(update(users).where(users.c.user_id == user.user_id).values(**values))
+            if result.rowcount == 0:
+                conn.execute(insert(users).values(**values, password_hash=""))
+
+    def password_hash(self, user_id: str) -> str:
+        with self.engine.connect() as conn:
+            row = conn.execute(select(users.c.password_hash).where(users.c.user_id == user_id)).first()
+        return row.password_hash if row else ""
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(update(users).where(users.c.user_id == user_id).values(password_hash=password_hash))
+
+    def count(self) -> int:
+        with self.engine.connect() as conn:
+            return conn.execute(select(func.count()).select_from(users)).scalar_one()
 
 
 class SqlExtractionRepository:

@@ -7,8 +7,10 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
 
 import backend.api.documents as documents_api
+from backend.api.security import current_user
+from backend.auth.permissions import AuthenticatedUser
 from backend.config import Settings
-from backend.models import ReviewPage
+from backend.models import ReviewPage, User
 from backend.repositories.sql import SqlDocumentRepository, SqlExtractionRepository, SqlJobQueue
 from backend.services.document_renamer import DocumentRenamer
 from backend.services.pdf_ingestion import ExtractedPage
@@ -103,6 +105,10 @@ class _FakeLLM:
         return {"tool_calls": [{"function": {"arguments": json.dumps(arguments)}}]}
 
 
+def _user(user_id, *roles):
+    return AuthenticatedUser.of(User(user_id=user_id, username=user_id, roles=list(roles), created_at="2026-11-03"))
+
+
 def _image_only_pdf(path, lines):
     image = Image.new("L", (1700, 2200), color=255)
     draw = ImageDraw.Draw(image)
@@ -147,6 +153,9 @@ def env(tmp_path, monkeypatch):
 
     app = FastAPI()
     app.include_router(documents_api.router)
+    # Utilizador do pedido: um gestor por defeito; os testes de permissões trocam-no.
+    state["user"] = _user("gestor", "manager")
+    app.dependency_overrides[current_user] = lambda: state["user"]
     state["client"] = TestClient(app)
     state["tmp_path"] = tmp_path
     # Sem workers em threads: os testes processam a fila quando querem.
@@ -434,3 +443,86 @@ def test_deleting_a_queued_document_cancels_its_job(env):
     assert env["client"].delete(f"/documents/{doc_id}").status_code == 200
     assert env["queue"].active_for_document(doc_id) is None
     assert env["run_jobs"]() == 0
+
+
+def _text_pages(monkeypatch, text):
+    """Extração com camada de texto (sem OCR): devolve sempre o mesmo texto na página 1."""
+    monkeypatch.setattr(
+        documents_api, "extract_pages", lambda path, **kwargs: [ExtractedPage(page=1, text=text, source="text")]
+    )
+
+
+def test_chat_only_user_cannot_see_or_change_documents(env):
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    env["user"] = _user("leitor", "chat")
+    client = env["client"]
+
+    assert client.get("/documents").status_code == 403
+    assert client.get("/documents/types").status_code == 403
+    assert client.get(f"/documents/{doc_id}/extraction").status_code == 403
+    assert client.post(f"/documents/{doc_id}/approve").status_code == 403
+    assert client.delete(f"/documents/{doc_id}").status_code == 403
+
+
+def test_reviewer_corrects_and_approves_but_cannot_upload(env):
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    env["user"] = _user("revisora", "reviewer")
+    client = env["client"]
+
+    assert client.post(f"/documents/{doc_id}/reindex").status_code == 403
+    res = client.put(f"/documents/{doc_id}/pages/1", json={"text": "Contrato de trabalho celebrado entre as partes."})
+    assert res.status_code == 200
+    doc = _approve(env, doc_id)
+    assert (doc["status"], doc["uploaded_by"], doc["approved_by"]) == ("indexed", "gestor", "revisora")
+
+
+def test_separate_approver_blocks_who_uploaded(env):
+    env["settings"] = env["settings"].model_copy(update={"require_separate_approver": True})
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    env["client"].put(f"/documents/{doc_id}/pages/1", json={"text": "Contrato de trabalho celebrado entre as partes."})
+
+    res = env["client"].post(f"/documents/{doc_id}/approve")
+    assert res.status_code == 403
+
+    env["user"] = _user("outro-gestor", "manager")
+    assert _approve(env, doc_id)["approved_by"] == "outro-gestor"
+
+
+def test_separate_approver_disables_auto_approve(env, monkeypatch):
+    _text_pages(monkeypatch, "Contrato de trabalho celebrado entre a empresa e o trabalhador.")
+    env["settings"] = env["settings"].model_copy(
+        update={"auto_approve_clean_documents": True, "require_separate_approver": True}
+    )
+    assert _upload(env, ["Contrato"])["status"] == "pending_review"
+
+
+def test_reindex_with_the_same_text_keeps_the_approval(env, monkeypatch):
+    _text_pages(monkeypatch, "Contrato de trabalho celebrado entre a empresa e o trabalhador.")
+    client = env["client"]
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    client.put(f"/documents/{doc_id}/metadata", json={"title": "Contrato revisto à mão"})
+    approved = _approve(env, doc_id)
+
+    env["user"] = _user("outro-gestor", "manager")
+    assert client.post(f"/documents/{doc_id}/reindex").status_code == 200
+    env["run_jobs"]()
+
+    doc = _doc(env, doc_id)
+    assert (doc["status"], doc["approved_by"], doc["uploaded_by"]) == ("indexed", "gestor", "outro-gestor")
+    assert doc["approved_fingerprint"] == approved["approved_fingerprint"]
+    # A ficha revista mantém-se (não se propõe outra).
+    assert doc["title"] == "Contrato revisto à mão"
+    assert doc_id in env["keywords"].documents
+
+
+def test_reindex_with_different_text_needs_a_new_approval(env, monkeypatch):
+    _text_pages(monkeypatch, "Contrato de trabalho celebrado entre a empresa e o trabalhador.")
+    doc_id = _upload(env, ["Contrato"])["document_id"]
+    _approve(env, doc_id)
+
+    _text_pages(monkeypatch, "Contrato de trabalho com uma cláusula nova sobre teletrabalho.")
+    env["client"].post(f"/documents/{doc_id}/reindex")
+    env["run_jobs"]()
+
+    assert _doc(env, doc_id)["status"] == "pending_review"
+    assert env["vectors"].chunks == {}

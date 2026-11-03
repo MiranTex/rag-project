@@ -15,9 +15,15 @@ class ExportedFile:
 class ExportStore:
     """Guarda os ficheiros gerados pelo agente num diretório próprio, sem nunca sobrescrever."""
 
-    def __init__(self, export_dir: str) -> None:
+    def __init__(self, export_dir: str | Path) -> None:
         self.root = Path(export_dir)
         self.root.mkdir(parents=True, exist_ok=True)
+
+    def for_owner(self, owner_id: str) -> "ExportStore":
+        """Diretório só de um utilizador: cada um lista e descarrega apenas o que o agente gerou para si."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", owner_id):
+            raise ValueError(f"Id de utilizador inválido para exports: {owner_id!r}")
+        return ExportStore(self.root / owner_id)
 
     @staticmethod
     def _slugify(name: str) -> str:

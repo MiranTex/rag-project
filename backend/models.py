@@ -30,6 +30,12 @@ class DocumentInfo(BaseModel):
     document_type: str = ""
     # Último erro de um trabalho em background (vazio quando correu bem).
     error: str = ""
+    # Quem pôs a versão atual em revisão (upload ou extrair de novo) e quem aprovou a última versão indexada
+    # (ids de utilizador; vazios nos documentos anteriores à autenticação e na aprovação automática).
+    uploaded_by: str = ""
+    approved_by: str = ""
+    # Impressão digital do texto aprovado: extrair de novo e obter o mesmo texto não obriga a nova aprovação.
+    approved_fingerprint: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -197,6 +203,58 @@ class ExportInfo(BaseModel):
     name: str
     size: int
     created_at: str
+
+
+class User(BaseModel):
+    user_id: str
+    username: str
+    display_name: str = ""
+    # Papéis (ver backend/auth/permissions.py); as permissões são a união das de cada papel.
+    roles: list[str] = Field(default_factory=list)
+    active: bool = True
+    # Identificador no sistema externo (claim "sub"); None nos utilizadores locais.
+    external_id: str | None = None
+    created_at: str
+
+
+class CurrentUserInfo(BaseModel):
+    user: User
+    permissions: list[str]
+
+
+class AuthConfig(BaseModel):
+    mode: Literal["local", "external"]
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: CurrentUserInfo
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=2, max_length=255)
+    password: str = Field(min_length=8)
+    display_name: str = ""
+    roles: list[str] = Field(default_factory=list)
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = None
+    roles: list[str] | None = None
+    active: bool | None = None
+    password: str | None = Field(default=None, min_length=8)
 
 
 JobStatus = Literal["queued", "running", "done", "failed"]

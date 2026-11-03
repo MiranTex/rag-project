@@ -6,7 +6,7 @@ tests/test_job_queue.py)."""
 
 from typing import Protocol
 
-from backend.models import DocumentInfo, DocumentMetadata, Job, ReviewPage
+from backend.models import DocumentInfo, DocumentMetadata, Job, ReviewPage, User
 
 
 class DocumentRepository(Protocol):
@@ -63,3 +63,25 @@ class JobQueue(Protocol):
         ...
 
     def counts(self) -> dict[str, int]: ...
+
+
+class UserRepository(Protocol):
+    """Utilizadores (locais e externos). A palavra-passe fica fora do modelo User: só se lê para a validar."""
+
+    def list_users(self) -> list[User]: ...
+
+    def find_by_id(self, user_id: str) -> User | None: ...
+
+    def find_by_username(self, username: str) -> User | None: ...
+
+    def find_by_external_id(self, external_id: str) -> User | None: ...
+
+    def add_or_replace(self, user: User) -> None:
+        """Grava o utilizador; a palavra-passe de um utilizador existente não muda (ver set_password_hash)."""
+        ...
+
+    def password_hash(self, user_id: str) -> str: ...
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None: ...
+
+    def count(self) -> int: ...

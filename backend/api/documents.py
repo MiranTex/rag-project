@@ -1,3 +1,5 @@
+import hashlib
+import json
 import logging
 import threading
 import time
@@ -6,9 +8,17 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
+from backend.api.security import require
+from backend.auth.permissions import (
+    DOCUMENTS_APPROVE,
+    DOCUMENTS_READ,
+    DOCUMENTS_REVIEW,
+    DOCUMENTS_UPLOAD,
+    AuthenticatedUser,
+)
 from backend.config import get_settings
 from backend.dependencies import (
     NON_CONTENT_SECTIONS,
@@ -60,6 +70,11 @@ from backend.services.pdf_ingestion import (
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
+
+can_read = require(DOCUMENTS_READ)
+can_upload = require(DOCUMENTS_UPLOAD)
+can_review = require(DOCUMENTS_REVIEW)
+can_approve = require(DOCUMENTS_APPROVE)
 
 _indexing_ids: set[str] = set()
 _indexing_lock = threading.Lock()
@@ -142,6 +157,12 @@ def _drop_legacy_file(previous: DocumentInfo, stored_name: str) -> None:
         (Path(get_settings().upload_dir) / legacy).unlink(missing_ok=True)
 
 
+def _fingerprint(pages: list[ReviewPage]) -> str:
+    """Resume o texto que vai para o índice (páginas incluídas, com o texto final de cada uma)."""
+    included = [[page.page, page.text] for page in pages if not page.excluded]
+    return hashlib.sha256(json.dumps(included, ensure_ascii=False).encode()).hexdigest()
+
+
 def _build_extraction(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentExtraction:
     metadata = get_extraction_store().load_metadata(info.document_id)
     doc_type = _document_type(metadata)
@@ -159,9 +180,12 @@ def _build_extraction(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentEx
     )
 
 
-def _extract_for_review(info: DocumentInfo, is_new: bool) -> tuple[DocumentInfo, list[ReviewPage]]:
+def _extract_for_review(info: DocumentInfo, is_new: bool) -> tuple[DocumentInfo, list[ReviewPage], bool]:
     """Fase 1 (em background): extrai o texto (pypdf + OCR), valida cada página, propõe a ficha e deixa o
-    documento à espera de revisão. O nome automático só se decide num upload novo (is_new)."""
+    documento à espera de revisão. O nome automático só se decide num upload novo (is_new).
+
+    Devolve também se o texto é igual ao da última versão aprovada: nesse caso a ficha revista mantém-se
+    (não se propõe outra) e o documento pode voltar ao índice sem nova aprovação."""
     settings = get_settings()
     started = time.perf_counter()
     document_id = info.document_id
@@ -203,8 +227,12 @@ def _extract_for_review(info: DocumentInfo, is_new: bool) -> tuple[DocumentInfo,
         )
 
     get_extraction_store().save(document_id, pages)
-    metadata = _propose_metadata(pages)
-    get_extraction_store().save_metadata(document_id, metadata)
+    unchanged = not is_new and bool(info.approved_fingerprint) and _fingerprint(pages) == info.approved_fingerprint
+    if unchanged:
+        metadata = get_extraction_store().load_metadata(document_id)
+    else:
+        metadata = _propose_metadata(pages)
+        get_extraction_store().save_metadata(document_id, metadata)
 
     info = _with_counts(_with_metadata(info, metadata), pages).model_copy(
         update={"status": "pending_review", "chunk_count": 0, "error": ""}
@@ -219,12 +247,12 @@ def _extract_for_review(info: DocumentInfo, is_new: bool) -> tuple[DocumentInfo,
         info.filename,
         info.page_count,
         info.alert_count,
-        "proposta" if metadata.auto_filled else "por preencher",
+        "mantida (texto igual ao aprovado)" if unchanged else "proposta" if metadata.auto_filled else "por preencher",
     )
-    return info, pages
+    return info, pages, unchanged
 
 
-def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
+def _approve(info: DocumentInfo, pages: list[ReviewPage], approved_by: str) -> DocumentInfo:
     """Fase 2: indexa o texto revisto (chunks, embeddings, Chroma e índice de palavras-chave)."""
     settings = get_settings()
     vector_store = get_vector_store()
@@ -309,7 +337,12 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage]) -> DocumentInfo:
     upsert_profile(get_profile_store(), settings.embedding_model, info, document_metadata, doc_type, body)
 
     indexed = _with_metadata(_with_counts(info, pages), document_metadata).model_copy(
-        update={"chunk_count": len(chunks), "status": "indexed"}
+        update={
+            "chunk_count": len(chunks),
+            "status": "indexed",
+            "approved_by": approved_by,
+            "approved_fingerprint": _fingerprint(pages),
+        }
     )
     get_registry().add_or_replace(indexed)
     logger.info("%s indexado em %.1fs", info.filename, time.perf_counter() - started)
@@ -320,11 +353,18 @@ def _run_extract_job(job: Job) -> None:
     info = get_registry().find_by_id(job.document_id)
     if info is None:
         return  # removido enquanto esperava na fila
-    info, pages = _extract_for_review(info, is_new=bool(job.payload.get("new")))
-    if not (get_settings().auto_approve_clean_documents and info.alert_count == 0):
+    info, pages, unchanged = _extract_for_review(info, is_new=bool(job.payload.get("new")))
+    settings = get_settings()
+    # Texto igual ao aprovado: volta ao índice com a aprovação anterior. Senão, a auto-aprovação (sem alertas)
+    # só se aplica quando não é obrigatório outra pessoa aprovar.
+    if unchanged:
+        approved_by = info.approved_by
+    elif settings.auto_approve_clean_documents and not settings.require_separate_approver and info.alert_count == 0:
+        approved_by = ""
+    else:
         return
     try:
-        _approve(info, pages)
+        _approve(info, pages, approved_by)
     except Exception as exc:
         # A extração correu bem: o documento fica em revisão, com o motivo, em vez de "failed".
         logger.exception("Indexação automática de %s falhou", info.filename)
@@ -333,7 +373,7 @@ def _run_extract_job(job: Job) -> None:
 
 def _run_index_job(job: Job) -> None:
     info, pages = _get_document_and_pages(job.document_id)
-    _approve(info, pages)
+    _approve(info, pages, job.payload.get("approved_by", ""))
 
 
 def _on_job_failure(job: Job, message: str) -> None:
@@ -399,12 +439,12 @@ def _find_page(pages: list[ReviewPage], page_number: int) -> ReviewPage:
     raise HTTPException(status_code=404, detail="Página não encontrada.")
 
 
-@router.get("", response_model=list[DocumentInfo])
+@router.get("", response_model=list[DocumentInfo], dependencies=[Depends(can_read)])
 def list_documents() -> list[DocumentInfo]:
     return get_registry().list_documents()
 
 
-@router.delete("/{document_id}")
+@router.delete("/{document_id}", dependencies=[Depends(can_upload)])
 def delete_document(document_id: str) -> dict:
     settings = get_settings()
     registry = get_registry()
@@ -433,7 +473,7 @@ def delete_document(document_id: str) -> dict:
     return {"message": "Documento removido com sucesso."}
 
 
-def _reextract(existing: DocumentInfo) -> UploadResponse:
+def _reextract(existing: DocumentInfo, user: AuthenticatedUser) -> UploadResponse:
     upload_path = _stored_path(existing)
     if not upload_path.exists():
         raise HTTPException(status_code=404, detail="Ficheiro original não encontrado no storage local.")
@@ -447,16 +487,18 @@ def _reextract(existing: DocumentInfo) -> UploadResponse:
                 update={"storage_name": stored_name, "original_filename": existing.original_filename or existing.filename}
             )
         # Volta a extrair do zero: as edições manuais anteriores perdem-se; o nome mantém-se.
+        # Quem extrai de novo passa a ser quem pôs esta versão em revisão (conta para a aprovação separada).
+        existing = existing.model_copy(update={"uploaded_by": user.user_id})
         info = _enqueue(existing, "extract", "extracting", {"new": False})
     return UploadResponse(message="Na fila para extrair de novo.", document=info)
 
 
 @router.post("/{document_id}/reindex", response_model=UploadResponse)
-def reindex_document(document_id: str) -> UploadResponse:
+def reindex_document(document_id: str, user: AuthenticatedUser = Depends(can_upload)) -> UploadResponse:
     existing = get_registry().find_by_id(document_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Documento não encontrado.")
-    return _reextract(existing)
+    return _reextract(existing, user)
 
 
 ALREADY_UPLOADED = {
@@ -472,6 +514,7 @@ ALREADY_UPLOADED = {
 async def upload_document(
     file: UploadFile = File(...),
     reindex: bool = Form(False),
+    user: AuthenticatedUser = Depends(can_upload),
 ) -> UploadResponse:
     """Guarda o PDF e põe-no na fila de extração; a resposta não espera pelo OCR."""
     if not file.filename.lower().endswith(".pdf"):
@@ -485,7 +528,7 @@ async def upload_document(
     sha = file_sha256(raw)
     existing = get_registry().find_by_hash(sha)
     if existing and reindex:
-        return _reextract(existing)
+        return _reextract(existing, user)
     if existing:
         return UploadResponse(message=ALREADY_UPLOADED.get(existing.status, "Documento já carregado."), document=existing)
 
@@ -503,19 +546,20 @@ async def upload_document(
         created_at=utc_now_iso(),
         chunk_count=0,
         status="extracting",
+        uploaded_by=user.user_id,
     )
     with _locked(document_id):
         info = _enqueue(info, "extract", "extracting", {"new": True})
     return UploadResponse(message="Na fila para extração.", document=info)
 
 
-@router.get("/{document_id}/extraction", response_model=DocumentExtraction)
+@router.get("/{document_id}/extraction", response_model=DocumentExtraction, dependencies=[Depends(can_read)])
 def get_extraction(document_id: str) -> DocumentExtraction:
     info, pages = _get_document_and_pages(document_id)
     return _build_extraction(info, pages)
 
 
-@router.put("/{document_id}/pages/{page_number}", response_model=DocumentExtraction)
+@router.put("/{document_id}/pages/{page_number}", response_model=DocumentExtraction, dependencies=[Depends(can_review)])
 def update_page(document_id: str, page_number: int, payload: PageUpdateRequest) -> DocumentExtraction:
     with _locked(document_id):
         info, pages = _get_document_and_pages(document_id)
@@ -531,7 +575,9 @@ def update_page(document_id: str, page_number: int, payload: PageUpdateRequest) 
         return _save_page(info, pages, page.model_copy(update=update))
 
 
-@router.post("/{document_id}/pages/{page_number}/ocr", response_model=DocumentExtraction)
+@router.post(
+    "/{document_id}/pages/{page_number}/ocr", response_model=DocumentExtraction, dependencies=[Depends(can_review)]
+)
 async def rerun_page_ocr(document_id: str, page_number: int, payload: PageOcrRequest) -> DocumentExtraction:
     settings = get_settings()
     dpi = payload.dpi or settings.ocr_dpi
@@ -569,7 +615,7 @@ def _clean_text_list(values: list[str]) -> list[str]:
     return [" ".join(value.split()) for value in values if value.strip()]
 
 
-@router.get("/types", response_model=list[DocumentTypeInfo])
+@router.get("/types", response_model=list[DocumentTypeInfo], dependencies=[Depends(can_read)])
 def list_document_types() -> list[DocumentTypeInfo]:
     """Tipos de documento configurados, para o formulário da ficha (o primeiro é o tipo por defeito)."""
     types = get_document_types()
@@ -586,7 +632,7 @@ def list_document_types() -> list[DocumentTypeInfo]:
     ]
 
 
-@router.put("/{document_id}/metadata", response_model=DocumentExtraction)
+@router.put("/{document_id}/metadata", response_model=DocumentExtraction, dependencies=[Depends(can_review)])
 def update_metadata(document_id: str, payload: MetadataUpdate) -> DocumentExtraction:
     with _locked(document_id):
         info, pages = _get_document_and_pages(document_id)
@@ -614,7 +660,7 @@ def update_metadata(document_id: str, payload: MetadataUpdate) -> DocumentExtrac
         return _build_extraction(info, pages)
 
 
-@router.post("/{document_id}/metadata/suggest", response_model=DocumentExtraction)
+@router.post("/{document_id}/metadata/suggest", response_model=DocumentExtraction, dependencies=[Depends(can_review)])
 async def suggest_metadata(document_id: str) -> DocumentExtraction:
     """Volta a propor a ficha (útil se o LLM estava em baixo na extração). Só preenche campos vazios,
     para não apagar correções feitas à mão."""
@@ -650,7 +696,7 @@ async def suggest_metadata(document_id: str) -> DocumentExtraction:
     return await run_in_threadpool(run)
 
 
-@router.put("/{document_id}/name", response_model=DocumentInfo)
+@router.put("/{document_id}/name", response_model=DocumentInfo, dependencies=[Depends(can_review)])
 def rename_document(document_id: str, payload: RenameRequest) -> DocumentInfo:
     """Muda o nome do documento no sistema; sem nome, volta ao sugerido pela ficha. Funciona também em
     documentos indexados (o nome muda nas fontes e citações)."""
@@ -664,12 +710,14 @@ def rename_document(document_id: str, payload: RenameRequest) -> DocumentInfo:
 
 
 @router.post("/{document_id}/approve", response_model=UploadResponse)
-def approve_document(document_id: str) -> UploadResponse:
+def approve_document(document_id: str, user: AuthenticatedUser = Depends(can_approve)) -> UploadResponse:
     """Põe o texto revisto na fila de indexação (chunks, embeddings, Chroma)."""
     with _locked(document_id):
         info, pages = _get_document_and_pages(document_id)
         _require_pending(info)
+        if get_settings().require_separate_approver and info.uploaded_by == user.user_id:
+            raise HTTPException(status_code=403, detail="Quem pôs o documento em revisão não o pode aprovar.")
         if not any(not page.excluded and page.text.strip() for page in pages):
             raise HTTPException(status_code=400, detail="Nenhuma página com texto para indexar.")
-        info = _enqueue(info, "index", "indexing")
+        info = _enqueue(info, "index", "indexing", {"approved_by": user.user_id})
     return UploadResponse(message="Aprovado. Na fila para indexação.", document=info)

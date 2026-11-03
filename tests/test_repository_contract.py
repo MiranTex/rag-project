@@ -38,6 +38,9 @@ def _doc(document_id="d1", **overrides) -> DocumentInfo:
         "year": 2024,
         "document_type": "generic",
         "error": "",
+        "uploaded_by": "u-ana",
+        "approved_by": "u-rui",
+        "approved_fingerprint": "f" * 64,
     }
     return DocumentInfo(**{**values, **overrides})
 

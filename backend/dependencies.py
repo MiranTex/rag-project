@@ -4,12 +4,19 @@ from functools import lru_cache
 from sqlalchemy import Engine
 
 from backend.agent.guard import ScopeGuard
+from backend.auth.authenticators import Authenticator, build_authenticator
 from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_settings
-from backend.repositories.contracts import DocumentRepository, ExtractionRepository, JobQueue
+from backend.repositories.contracts import DocumentRepository, ExtractionRepository, JobQueue, UserRepository
 from backend.repositories.database import upgrade_database
 from backend.repositories.legacy_import import import_legacy_json
-from backend.repositories.sql import SqlDocumentRepository, SqlExtractionRepository, SqlJobQueue, create_db_engine
+from backend.repositories.sql import (
+    SqlDocumentRepository,
+    SqlExtractionRepository,
+    SqlJobQueue,
+    SqlUserRepository,
+    create_db_engine,
+)
 from backend.services.document_profiles import upsert_profile
 from backend.services.document_renamer import DocumentRenamer
 from backend.services.document_types import DocumentTypes, load_document_types
@@ -38,6 +45,16 @@ def get_registry() -> DocumentRepository:
 @lru_cache(maxsize=1)
 def get_job_queue() -> JobQueue:
     return SqlJobQueue(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_users() -> UserRepository:
+    return SqlUserRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_authenticator() -> Authenticator:
+    return build_authenticator(get_settings(), get_users())
 
 
 @lru_cache(maxsize=1)

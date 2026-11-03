@@ -1,9 +1,11 @@
 from collections.abc import Iterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from backend.api.security import require
 from backend.api.sse import sse_event, stop_on_disconnect
+from backend.auth.permissions import CHAT_SELECT_DOCUMENT, CHAT_USE, AuthenticatedUser
 from backend.config import get_settings
 from backend.dependencies import get_rag_pipeline
 from backend.models import AskRequest, AskResponse
@@ -12,11 +14,19 @@ from backend.services.rag_pipeline import SYSTEM_PROMPT
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-@router.post("/ask", response_model=AskResponse)
-def ask_question(payload: AskRequest) -> AskResponse:
+def _validated(payload: AskRequest, user: AuthenticatedUser) -> str:
+    """Pergunta limpa; restringir a um documento (document_id) exige permissão própria."""
+    if payload.document_id and not user.can(CHAT_SELECT_DOCUMENT):
+        raise HTTPException(status_code=403, detail="Sem permissão para escolher um documento.")
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Pergunta inválida.")
+    return question
+
+
+@router.post("/ask", response_model=AskResponse)
+def ask_question(payload: AskRequest, user: AuthenticatedUser = Depends(require(CHAT_USE))) -> AskResponse:
+    question = _validated(payload, user)
 
     settings = get_settings()
     top_k = payload.top_k or settings.top_k
@@ -64,10 +74,8 @@ def ask_question(payload: AskRequest) -> AskResponse:
 
 
 @router.post("/ask-stream")
-def ask_question_stream(payload: AskRequest) -> StreamingResponse:
-    question = payload.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Pergunta inválida.")
+def ask_question_stream(payload: AskRequest, user: AuthenticatedUser = Depends(require(CHAT_USE))) -> StreamingResponse:
+    question = _validated(payload, user)
 
     settings = get_settings()
     top_k = payload.top_k or settings.top_k
