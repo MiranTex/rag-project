@@ -31,6 +31,7 @@ def ask_question(payload: AskRequest) -> AskResponse:
             n_expansions=payload.multi_query_n,
             retrieval_mode=retrieval_mode,
             keyword_top_k=payload.keyword_top_k,
+            session_id=payload.session_id,
         )
         return AskResponse(
             answer=answer,
@@ -46,6 +47,7 @@ def ask_question(payload: AskRequest) -> AskResponse:
             document_id=payload.document_id,
             retrieval_mode=retrieval_mode,
             keyword_top_k=payload.keyword_top_k,
+            session_id=payload.session_id,
         )
         return AskResponse(
             answer=answer,
@@ -59,6 +61,7 @@ def ask_question(payload: AskRequest) -> AskResponse:
         document_id=payload.document_id,
         retrieval_mode=retrieval_mode,
         keyword_top_k=payload.keyword_top_k,
+        session_id=payload.session_id,
     )
     return AskResponse(answer=answer, sources=sources)
 
@@ -89,6 +92,7 @@ def ask_question_stream(payload: AskRequest) -> StreamingResponse:
                     n_expansions=payload.multi_query_n,
                     retrieval_mode=retrieval_mode,
                     keyword_top_k=payload.keyword_top_k,
+                    session_id=payload.session_id,
                 )
                 yield _sse_event("sources", {"sources": [src.model_dump() for src in sources]})
                 if payload.include_debug:
@@ -108,6 +112,7 @@ def ask_question_stream(payload: AskRequest) -> StreamingResponse:
                 document_id=payload.document_id,
                 retrieval_mode=retrieval_mode,
                 keyword_top_k=payload.keyword_top_k,
+                session_id=payload.session_id,
             )
             yield _sse_event("sources", {"sources": [src.model_dump() for src in sources]})
             if payload.include_debug:

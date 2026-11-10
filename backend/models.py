@@ -25,6 +25,7 @@ class AskRequest(BaseModel):
     multi_query_n: int = Field(default=3, ge=1, le=6)
     retrieval_mode: Literal["hybrid", "vector", "keyword"] | None = None
     keyword_top_k: int | None = Field(default=None, ge=1, le=50)
+    session_id: str | None = None
 
 
 class SourceChunk(BaseModel):

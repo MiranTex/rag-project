@@ -24,6 +24,15 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [asking, setAsking] = useState(false);
   const [multiQuery, setMultiQuery] = useState(false);
+  const [sessionId] = useState(() => {
+    const existing = window.localStorage.getItem("rag-study-session-id");
+    if (existing) {
+      return existing;
+    }
+    const created = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    window.localStorage.setItem("rag-study-session-id", created);
+    return created;
+  });
 
   useEffect(() => {
     try {
@@ -104,6 +113,7 @@ export default function App() {
           document_id: selectedDocument || null,
           include_debug: true,
           multi_query: multiQuery,
+          session_id: sessionId,
         },
         {
           onSources: (sources) => {

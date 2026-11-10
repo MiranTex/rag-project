@@ -1,5 +1,6 @@
-from backend.services.rag_pipeline import RagPipeline, build_answer_prompt, score_candidate
 from backend.services.keyword_index import KeywordIndex
+from backend.services.memory import SessionMemory
+from backend.services.rag_pipeline import RagPipeline, build_answer_prompt, score_candidate
 
 
 def test_hybrid_score_prefers_keyword_overlap() -> None:
@@ -203,3 +204,54 @@ def test_hybrid_mode_emits_lexical_score_in_diagnostics(monkeypatch) -> None:
     assert len(diagnostics) == 2
     assert all(diag.retrieval_mode == "hybrid" for diag in diagnostics)
     assert any(diag.lexical_score > 0 for diag in diagnostics)
+
+
+def test_build_user_prompt_includes_session_memory(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("backend.services.rag_pipeline.embed_query", lambda model_name, question: [0.1, 0.2])
+    memory_service = SessionMemory(storage_dir=tmp_path / "memory")
+    pipeline = RagPipeline(
+        embedding_model="fake-model",
+        vector_store=_FakeVectorStore(),
+        keyword_index=_build_keyword_index(),
+        lmstudio_client=_FakeLMStudioClient(),
+        memory_service=memory_service,
+    )
+
+    prompt, _, _ = pipeline.build_user_prompt_with_debug(
+        question="explica o contexto",
+        top_k=1,
+        session_id="sess-1",
+    )
+
+    assert "Memória da sessão" in prompt
+
+
+def test_ask_persists_session_memory(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("backend.services.rag_pipeline.embed_query", lambda model_name, question: [0.1, 0.2])
+    memory_service = SessionMemory(storage_dir=tmp_path / "memory")
+    pipeline = RagPipeline(
+        embedding_model="fake-model",
+        vector_store=_FakeVectorStore(),
+        keyword_index=_build_keyword_index(),
+        lmstudio_client=_FakeLMStudioClient(),
+        memory_service=memory_service,
+    )
+
+    pipeline.ask(question="explica o contexto", top_k=1, session_id="sess-2")
+
+    context = memory_service.get_context("sess-2")
+    assert "explica o contexto" in context.lower()
+
+
+def test_build_user_prompt_surfaces_recent_conversation_history(tmp_path) -> None:
+    memory_service = SessionMemory(storage_dir=tmp_path / "memory")
+    memory_service.remember("sess-3", "O que é o RAG?", "O RAG é uma abordagem de recuperação e geração.")
+
+    prompt = build_answer_prompt(
+        "Explique melhor",
+        "Contexto recuperado",
+        memory_context=memory_service.get_context("sess-3"),
+    )
+
+    assert "Interações recentes" in prompt
+    assert "O que é o RAG?" in prompt

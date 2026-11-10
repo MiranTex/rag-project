@@ -1,9 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
 
 from backend.config import get_settings
 from backend.services.document_registry import DocumentRegistry
 from backend.services.keyword_index import KeywordIndex
 from backend.services.lmstudio_client import LMStudioClient
+from backend.services.memory import SessionMemory
 from backend.services.rag_pipeline import RagPipeline
 from backend.services.vector_store import VectorStore
 
@@ -44,6 +46,7 @@ def get_lmstudio_client() -> LMStudioClient:
 @lru_cache(maxsize=1)
 def get_rag_pipeline() -> RagPipeline:
     settings = get_settings()
+    memory_dir = Path(settings.upload_dir) / "memory"
     return RagPipeline(
         embedding_model=settings.embedding_model,
         vector_store=get_vector_store(),
@@ -52,4 +55,5 @@ def get_rag_pipeline() -> RagPipeline:
         rerank_weights=settings.parse_rerank_weights("default"),
         retrieval_mode_default=settings.retrieval_mode_default,
         keyword_candidate_multiplier=settings.keyword_candidate_multiplier,
+        memory_service=SessionMemory(storage_dir=memory_dir),
     )
