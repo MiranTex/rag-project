@@ -5,3 +5,15 @@ backend-start:
 frontend-start:
 	@echo "Starting frontend development server..."
 	cd frontend && npm run dev
+
+up:
+	docker compose up -d --build
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f backend
+
+test:
+	docker compose run --rm --no-deps backend pytest -q

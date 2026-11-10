@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Tema escuro controlado pela classe .dark no <html> (ver index.html e theme.js). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Laranja da versão anterior, mantido como única cor de destaque. */
+  --color-accent-50: #fdf3ee;
+  --color-accent-100: #fbe3d6;
+  --color-accent-400: #e8805a;
+  --color-accent-500: #d7582b;
+  --color-accent-600: #bf4a21;
+  --color-accent-700: #9c3c1b;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-stone-50 text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100;
+  }
+
+  /* A lista aberta de um <select> é desenhada pelo sistema e herda a cor do texto do select
+     (cinzento nas etiquetas); sem cores explícitas fica ilegível no tema escuro em Windows. */
+  option {
+    @apply bg-white text-stone-900 dark:bg-stone-800 dark:text-stone-100;
+  }
+
+  ::selection {
+    @apply bg-accent-100 dark:bg-accent-500/40;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 180ms ease-out;
+}

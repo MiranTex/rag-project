@@ -1,0 +1,65 @@
+"""Contratos da persistência. O resto do código depende só destas interfaces; as implementações (SQL com
+SQLAlchemy para SQLite/PostgreSQL, JSON legado) são escolhidas em dependencies.py.
+
+Qualquer implementação nova tem de passar os testes de contrato (tests/test_repository_contract.py e
+tests/test_job_queue.py)."""
+
+from typing import Protocol
+
+from backend.models import DocumentInfo, DocumentMetadata, Job, ReviewPage
+
+
+class DocumentRepository(Protocol):
+    """Registo dos documentos (nome, estado, contagens, resumo da ficha)."""
+
+    def list_documents(self) -> list[DocumentInfo]: ...
+
+    def find_by_id(self, document_id: str) -> DocumentInfo | None: ...
+
+    def find_by_hash(self, sha256: str) -> DocumentInfo | None: ...
+
+    def add_or_replace(self, info: DocumentInfo) -> None: ...
+
+    def remove(self, document_id: str) -> bool: ...
+
+
+class ExtractionRepository(Protocol):
+    """Texto extraído por página e ficha de cada documento."""
+
+    def save(self, document_id: str, pages: list[ReviewPage]) -> None: ...
+
+    def load(self, document_id: str) -> list[ReviewPage] | None: ...
+
+    def save_metadata(self, document_id: str, metadata: DocumentMetadata) -> None: ...
+
+    def load_metadata(self, document_id: str) -> DocumentMetadata: ...
+
+    def delete(self, document_id: str) -> None: ...
+
+
+class JobQueue(Protocol):
+    """Fila de trabalhos em background (extração, indexação). Partilhada por todos os workers, por isso
+    claim_next tem de ser atómico: dois workers nunca recebem o mesmo trabalho."""
+
+    def enqueue(self, kind: str, document_id: str, payload: dict | None = None) -> Job: ...
+
+    def claim_next(self, worker_id: str) -> Job | None: ...
+
+    def complete(self, job_id: int) -> None: ...
+
+    def fail(self, job_id: int, error: str) -> None: ...
+
+    def get(self, job_id: int) -> Job | None: ...
+
+    def active_for_document(self, document_id: str) -> Job | None:
+        """Trabalho em fila ou a correr para o documento, se houver."""
+        ...
+
+    def cancel_queued(self, document_id: str) -> int: ...
+
+    def requeue_running(self, started_before: str | None = None, worker_prefix: str | None = None) -> int:
+        """Volta a pôr na fila trabalhos que ficaram "running" porque o worker morreu: os que começaram antes
+        de `started_before` e/ou cujo worker_id começa por `worker_prefix`."""
+        ...
+
+    def counts(self) -> dict[str, int]: ...

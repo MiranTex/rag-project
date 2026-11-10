@@ -5,13 +5,13 @@ import requests
 
 
 class LMStudioClient:
-    def __init__(self, base_url: str, model: str, max_tokens: int = 900) -> None:
+    def __init__(self, base_url: str, model: str, api_key: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.max_tokens = max_tokens
+        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     def health(self) -> bool:
-        response = requests.get(f"{self.base_url}/models", timeout=5)
+        response = requests.get(f"{self.base_url}/models", headers=self.headers, timeout=5)
         return response.ok
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> str:
@@ -27,11 +27,38 @@ class LMStudioClient:
         response = requests.post(
             f"{self.base_url}/chat/completions",
             json=payload,
+            headers=self.headers,
             timeout=120,
         )
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()
+
+    def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        tool_choice: str | dict | None = None,
+        temperature: float = 0.2,
+    ) -> dict:
+        """Chamada no formato OpenAI com suporte a tool calling; devolve a mensagem do assistente."""
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if tools:
+            payload["tools"] = tools
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+        response = requests.post(
+            f"{self.base_url}/chat/completions",
+            json=payload,
+            headers=self.headers,
+            timeout=120,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]
 
     def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> Iterator[str]:
         payload = {
@@ -47,6 +74,7 @@ class LMStudioClient:
         response = requests.post(
             f"{self.base_url}/chat/completions",
             json=payload,
+            headers=self.headers,
             timeout=120,
             stream=True,
         )

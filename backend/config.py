@@ -8,7 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
     lm_studio_chat_model: str = "local-model"
-    lm_studio_max_tokens: int = 900
+    open_router_api_key: str = ""
+    open_router_base_url: str = "https://openrouter.ai/api/v1"
+    open_router_chat_model: str = "anthropic/claude-sonnet-5.5"
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
     chroma_host: str = "127.0.0.1"
@@ -24,6 +26,34 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 150
     upload_dir: str = "data/uploads"
+    # Base de dados (registo, extrações, fila de trabalhos): sqlite:///… ou postgresql+psycopg://…
+    database_url: str = "sqlite:///backend/storage/rag.db"
+    # Workers da fila de extração/indexação dentro da API; 0 se correrem noutro processo (python -m backend.worker).
+    indexing_workers: int = 1
+    job_poll_seconds: float = 1.0
+    # Trabalhos "running" há mais do que isto voltam à fila (worker que morreu a meio).
+    job_stale_minutes: int = 60
+    export_dir: str = "data/exports"
+    agent_max_steps: int = 8
+    guard_enabled: bool = True
+    guard_model: str = "anthropic/claude-haiku-5.5"
+    ocr_enabled: bool = True
+    ocr_languages: str = "por+eng"
+    ocr_dpi: int = 300
+    ocr_min_text_chars: int = 30
+    ocr_min_confidence: float = 60.0
+    ocr_max_workers: int = 4
+    # Fase de revisão: com auto-aprovação, documentos sem alertas são indexados logo após a extração.
+    auto_approve_clean_documents: bool = False
+    review_max_garbled_ratio: float = 0.15
+    # Ficha do documento (tipo, título, autores, ano...) proposta pelo LLM na extração.
+    metadata_extraction_enabled: bool = True
+    # Nome no sistema gerado da ficha no upload (padrão name_pattern em document_types.json).
+    auto_rename_documents: bool = True
+    # Tipos de documento desta base de conhecimento (campos da ficha e títulos de secção).
+    document_types_file: str = "backend/document_types.json"
+    # Uma frase sobre esta base de conhecimento, usada nos prompts (guarda, agente, extração da ficha).
+    knowledge_base_description: str = "Base de conhecimento com os documentos da organização."
     rerank_weights_default: str = '{"vector": 0.45, "lexical": 0.20, "keyword": 0.20, "position": 0.10, "density": 0.05}'
     rerank_weights_grounding: str = '{"vector": 0.35, "lexical": 0.25, "keyword": 0.25, "position": 0.10, "density": 0.05}'
 
@@ -45,4 +75,5 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.export_dir).mkdir(parents=True, exist_ok=True)
     return settings

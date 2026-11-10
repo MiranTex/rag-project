@@ -3,17 +3,128 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+# extracting/indexing: há um trabalho em background (ver JobQueue); failed: a extração falhou (ver error).
+DocumentStatus = Literal["extracting", "pending_review", "indexing", "indexed", "failed"]
+# original: nome do ficheiro carregado; suggested: gerado da ficha no upload; manual: escolhido à mão.
+NameSource = Literal["original", "suggested", "manual"]
+
+
 class DocumentInfo(BaseModel):
     document_id: str
+    # Nome no sistema: o que aparece na lista, nas fontes e nas citações (ver document_naming.py).
     filename: str
+    original_filename: str = ""
+    # Nome do PDF em disco, dentro de UPLOAD_DIR. Vazio nos documentos antigos, guardados com o nome original.
+    storage_name: str = ""
+    name_source: NameSource = "original"
     sha256: str
     created_at: str
     chunk_count: int
+    # Documentos registados antes da fase de revisão já estavam indexados.
+    status: DocumentStatus = "indexed"
+    page_count: int = 0
+    alert_count: int = 0
+    # Resumo da ficha (ver DocumentMetadata) para a listagem; a ficha completa fica com a extração.
+    title: str = ""
+    year: int | None = None
+    document_type: str = ""
+    # Último erro de um trabalho em background (vazio quando correu bem).
+    error: str = ""
 
 
 class UploadResponse(BaseModel):
     message: str
     document: DocumentInfo
+
+
+class PageAlert(BaseModel):
+    code: str
+    message: str
+
+
+class ReviewPage(BaseModel):
+    page: int
+    text: str
+    source: Literal["text", "ocr", "manual", "none"]
+    ocr_confidence: float | None = None
+    alerts: list[PageAlert] = Field(default_factory=list)
+    excluded: bool = False
+    edited: bool = False
+
+
+FieldValue = str | list[str]
+
+
+class DocumentMetadata(BaseModel):
+    """Ficha de um documento: núcleo comum a todos os tipos + campos próprios do tipo (ver document_types.json).
+    Proposta na extração (regras + LLM) e confirmada na revisão."""
+
+    document_type: str = ""
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = Field(default=None, ge=1900, le=2100)
+    keywords: list[str] = Field(default_factory=list)
+    abstract: str = ""
+    fields: dict[str, FieldValue] = Field(default_factory=dict)
+    # Só gravadas na aprovação, a partir do texto revisto (ver GET /extraction para a versão atual).
+    references: list[str] = Field(default_factory=list)
+    auto_filled: bool = False
+
+
+class MetadataUpdate(BaseModel):
+    document_type: str = ""
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = Field(default=None, ge=1900, le=2100)
+    keywords: list[str] = Field(default_factory=list)
+    abstract: str = ""
+    fields: dict[str, FieldValue] = Field(default_factory=dict)
+
+
+class DocumentTypeField(BaseModel):
+    key: str
+    label: str
+    type: Literal["text", "list", "people"]
+    hint: str = ""
+    filterable: bool = False
+
+
+class DocumentTypeInfo(BaseModel):
+    key: str
+    label: str
+    description: str
+    fields: list[DocumentTypeField]
+    sections: list[dict[str, str]]
+
+
+class SectionHeading(BaseModel):
+    section: str
+    label: str
+    page: int
+    text: str
+
+
+class DocumentExtraction(BaseModel):
+    document: DocumentInfo
+    pages: list[ReviewPage]
+    metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
+    sections: list[SectionHeading] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
+    suggested_name: str = ""
+
+
+class RenameRequest(BaseModel):
+    # None (ou vazio) volta ao nome sugerido pela ficha.
+    name: str | None = None
+
+
+class PageUpdateRequest(BaseModel):
+    text: str | None = None
+    excluded: bool | None = None
+
+
+class PageOcrRequest(BaseModel):
+    dpi: int | None = Field(default=None, ge=72, le=600)
 
 
 class AskRequest(BaseModel):
@@ -37,6 +148,7 @@ class SourceChunk(BaseModel):
     text: str
     document_chunk_count: int | None = None
     lexical_score: float = 0.0
+    section: str | None = None
 
 
 class RetrievalDiagnostic(BaseModel):
@@ -61,3 +173,45 @@ class AskResponse(BaseModel):
     sources: list[SourceChunk]
     retrieval_diagnostics: list[RetrievalDiagnostic] | None = None
     expanded_queries: list[str] | None = None
+
+
+class AgentTurn(BaseModel):
+    question: str
+    answer: str
+
+
+class AgentAskRequest(BaseModel):
+    question: str = Field(min_length=2)
+    profile: str | None = None
+    document_id: str | None = None
+    history: list[AgentTurn] = Field(default_factory=list, max_length=20)
+
+
+class AgentProfileInfo(BaseModel):
+    name: str
+    label: str
+    description: str
+    tools: list[str]
+
+
+class ExportInfo(BaseModel):
+    name: str
+    size: int
+    created_at: str
+
+
+JobStatus = Literal["queued", "running", "done", "failed"]
+
+
+class Job(BaseModel):
+    id: int
+    kind: str
+    document_id: str
+    status: JobStatus
+    payload: dict = Field(default_factory=dict)
+    error: str = ""
+    attempts: int = 0
+    worker_id: str = ""
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None

@@ -6,6 +6,9 @@ from backend.models import DocumentInfo
 
 
 class DocumentRegistry:
+    """Registo em JSON (versão anterior à base de dados). Cumpre DocumentRepository; hoje serve para importar
+    os dados antigos (ver repositories/legacy_import.py)."""
+
     def __init__(self, path: str = "backend/storage/documents.json") -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)

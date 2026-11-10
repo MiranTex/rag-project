@@ -1,10 +1,16 @@
 import hashlib
+import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pypdf import PdfReader
+
+from backend.services.ocr import ocr_image, render_page
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -14,27 +20,93 @@ class ChunkRecord:
     page: int
     chunk_index: int
     document_chunk_count: int = 0
+    section: str | None = None
+
+
+@dataclass
+class ExtractedPage:
+    page: int
+    text: str
+    source: str  # "text" (camada de texto do PDF) ou "ocr"
+    ocr_confidence: float | None = None
+
+
+def normalize_text(text: str) -> str:
+    """Normaliza espaços dentro de cada linha mas mantém as quebras: os títulos de secção e as entradas
+    da bibliografia só se reconhecem linha a linha."""
+    lines = (" ".join(line.split()) for line in text.splitlines())
+    return "\n".join(line for line in lines if line)
 
 
 def file_sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def save_uploaded_file(upload_dir: str, filename: str, content: bytes) -> Path:
-    safe_name = filename.replace("/", "_").replace("\\", "_")
+def save_uploaded_file(upload_dir: str, stored_name: str, content: bytes) -> Path:
+    safe_name = stored_name.replace("/", "_").replace("\\", "_")
     target = Path(upload_dir) / safe_name
-    target.write_bytes(content)
+    # Escrita atómica: um leitor concorrente nunca vê o ficheiro truncado a meio da escrita.
+    tmp = target.with_name(f".{target.name}.tmp")
+    tmp.write_bytes(content)
+    tmp.replace(target)
     return target
 
 
-def extract_pages(pdf_path: Path) -> list[tuple[int, str]]:
+def count_pages(pdf_path: Path) -> int:
+    return len(PdfReader(str(pdf_path)).pages)
+
+
+def extract_pages(
+    pdf_path: Path,
+    ocr_languages: str | None = None,
+    ocr_dpi: int = 300,
+    ocr_min_text_chars: int = 30,
+    ocr_min_confidence: float = 60.0,
+    ocr_max_workers: int = 4,
+) -> list[ExtractedPage]:
+    """Extrai o texto de cada página; páginas sem camada de texto passam por OCR se ocr_languages estiver definido."""
     reader = PdfReader(str(pdf_path))
-    pages: list[tuple[int, str]] = []
+    pages: list[ExtractedPage] = []
+    ocr_candidates: list[int] = []
     for i, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-        if text:
-            normalized = " ".join(text.split())
-            pages.append((i, normalized))
+        text = normalize_text(page.extract_text() or "")
+        if len(text) >= ocr_min_text_chars:
+            pages.append(ExtractedPage(page=i, text=text, source="text"))
+        else:
+            ocr_candidates.append(i)
+
+    if ocr_candidates and not ocr_languages:
+        logger.warning("%s: %d página(s) sem texto ignoradas (OCR desativado): %s", pdf_path.name, len(ocr_candidates), ocr_candidates)
+    elif ocr_candidates:
+        logger.info("%s: a aplicar OCR a %d página(s): %s", pdf_path.name, len(ocr_candidates), ocr_candidates)
+
+        def run_ocr(page_number: int):
+            return page_number, ocr_image(render_page(pdf_path, page_number, ocr_dpi), ocr_languages)
+
+        with ThreadPoolExecutor(max_workers=max(1, ocr_max_workers)) as pool:
+            for page_number, result in pool.map(run_ocr, ocr_candidates):
+                if not result.text:
+                    logger.warning("%s p.%d: OCR não encontrou texto", pdf_path.name, page_number)
+                    continue
+                log = logger.warning if result.confidence < ocr_min_confidence else logger.info
+                log(
+                    "%s p.%d: OCR %d palavras, confiança média %.1f%s",
+                    pdf_path.name,
+                    page_number,
+                    result.word_count,
+                    result.confidence,
+                    " (baixa — rever texto)" if result.confidence < ocr_min_confidence else "",
+                )
+                pages.append(
+                    ExtractedPage(
+                        page=page_number,
+                        text=normalize_text(result.text),
+                        source="ocr",
+                        ocr_confidence=result.confidence,
+                    )
+                )
+
+    pages.sort(key=lambda p: p.page)
     return pages
 
 
@@ -85,15 +157,18 @@ def _finalize_chunk(text: str) -> str:
 
 
 def chunk_pages(
-    pages: list[tuple[int, str]],
+    pages: list[tuple[int, str]] | list[tuple[int, str, str | None]],
     document_id: str,
     chunk_size: int,
     chunk_overlap: int,
 ) -> list[ChunkRecord]:
+    """Divide cada segmento em chunks. Um segmento é (página, texto) ou (página, texto, secção);
+    os chunks nunca atravessam segmentos, por isso cada chunk pertence a uma única secção."""
     chunks: list[ChunkRecord] = []
     global_chunk_index = 0
 
-    for page, page_text in pages:
+    for page, page_text, *rest in pages:
+        section = rest[0] if rest else None
         normalized_text = re.sub(r"\s+", " ", page_text).strip()
         if not normalized_text:
             continue
@@ -119,6 +194,7 @@ def chunk_pages(
                         text=chunk_text,
                         page=page,
                         chunk_index=global_chunk_index,
+                        section=section,
                     )
                 )
                 global_chunk_index += 1
@@ -138,6 +214,7 @@ def chunk_pages(
                     text=chunk_text,
                     page=page,
                     chunk_index=global_chunk_index,
+                    section=section,
                 )
             )
             global_chunk_index += 1

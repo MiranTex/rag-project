@@ -77,6 +77,82 @@ export async function reindexDocument(documentId) {
   return data;
 }
 
+export async function getExtraction(documentId) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/extraction`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao carregar extração");
+  return data;
+}
+
+export async function updatePage(documentId, page, changes) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/pages/${page}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao guardar página");
+  return data;
+}
+
+export async function rerunPageOcr(documentId, page, dpi = null) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/pages/${page}/ocr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dpi }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao repetir OCR");
+  return data;
+}
+
+export async function getDocumentTypes() {
+  const res = await fetch(`${API_BASE}/documents/types`);
+  if (!res.ok) throw new Error("Falha ao carregar os tipos de documento");
+  return res.json();
+}
+
+export async function updateMetadata(documentId, metadata) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/metadata`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(metadata),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao guardar a ficha");
+  return data;
+}
+
+export async function suggestMetadata(documentId) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/metadata/suggest`, {
+    method: "POST",
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao preencher a ficha");
+  return data;
+}
+
+// name vazio/null volta ao nome sugerido pela ficha.
+export async function renameDocument(documentId, name) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/name`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name || null }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao renomear");
+  return data;
+}
+
+export async function approveDocument(documentId) {
+  const res = await fetch(`${API_BASE}/documents/${documentId}/approve`, {
+    method: "POST",
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Falha ao aprovar documento");
+  return data;
+}
+
 export async function askQuestion(payload) {
   const res = await fetch(`${API_BASE}/chat/ask`, {
     method: "POST",
@@ -88,11 +164,13 @@ export async function askQuestion(payload) {
   return data;
 }
 
-export async function askQuestionStream(payload, handlers) {
-  const res = await fetch(`${API_BASE}/chat/ask-stream`, {
+// `signal` (AbortController) cancela o pedido; o backend deixa de correr passos quando a ligação fecha.
+async function streamEvents(path, payload, onEvent, signal) {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
 
   if (!res.ok) {
@@ -130,26 +208,46 @@ export async function askQuestionStream(payload, handlers) {
     const chunk = buffer.slice(0, boundary + 2);
     buffer = buffer.slice(boundary + 2);
 
-    const events = parseSseChunk(chunk);
-    for (const evt of events) {
-      if (evt.event === "sources" && handlers?.onSources) {
-        handlers.onSources(evt.data.sources || []);
-      }
-      if (evt.event === "expanded_queries" && handlers?.onExpandedQueries) {
-        handlers.onExpandedQueries(evt.data.expanded_queries || []);
-      }
-      if (evt.event === "diagnostics" && handlers?.onDiagnostics) {
-        handlers.onDiagnostics(evt.data.retrieval_diagnostics || []);
-      }
-      if (evt.event === "token" && handlers?.onToken) {
-        handlers.onToken(evt.data.token || "");
-      }
-      if (evt.event === "done" && handlers?.onDone) {
-        handlers.onDone(evt.data.answer || "");
-      }
+    for (const evt of parseSseChunk(chunk)) {
       if (evt.event === "error") {
         throw new Error(evt.data.detail || "Erro no stream do servidor");
       }
+      onEvent(evt);
     }
   }
+}
+
+export async function askQuestionStream(payload, handlers, signal) {
+  await streamEvents("/chat/ask-stream", payload, (evt) => {
+    if (evt.event === "sources" && handlers?.onSources) {
+      handlers.onSources(evt.data.sources || []);
+    }
+    if (evt.event === "expanded_queries" && handlers?.onExpandedQueries) {
+      handlers.onExpandedQueries(evt.data.expanded_queries || []);
+    }
+    if (evt.event === "diagnostics" && handlers?.onDiagnostics) {
+      handlers.onDiagnostics(evt.data.retrieval_diagnostics || []);
+    }
+    if (evt.event === "token" && handlers?.onToken) {
+      handlers.onToken(evt.data.token || "");
+    }
+    if (evt.event === "done" && handlers?.onDone) {
+      handlers.onDone(evt.data.answer || "");
+    }
+  }, signal);
+}
+
+// Eventos: thinking, tool_call, tool_result, export, sources, answer, done.
+export async function askAgentStream(payload, onEvent, signal) {
+  await streamEvents("/agent/ask-stream", payload, onEvent, signal);
+}
+
+export async function getAgentProfiles() {
+  const res = await fetch(`${API_BASE}/agent/profiles`);
+  if (!res.ok) throw new Error("Falha ao listar perfis do agente");
+  return res.json();
+}
+
+export function exportUrl(name) {
+  return `${API_BASE}/exports/${encodeURIComponent(name)}`;
 }

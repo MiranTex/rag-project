@@ -27,3 +27,13 @@ def test_chunk_pages_respects_sentence_boundaries() -> None:
 
     assert len(chunks) >= 2
     assert all(chunk.text.endswith((".", "!", "?")) for chunk in chunks)
+
+
+def test_save_uploaded_file_overwrites_atomically(tmp_path):
+    from backend.services.pdf_ingestion import save_uploaded_file
+
+    save_uploaded_file(str(tmp_path), "a.pdf", b"v1")
+    target = save_uploaded_file(str(tmp_path), "a.pdf", b"v2")
+
+    assert target.read_bytes() == b"v2"
+    assert [p.name for p in tmp_path.iterdir()] == ["a.pdf"]

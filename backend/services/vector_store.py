@@ -28,6 +28,21 @@ class VectorStore:
             metadatas=metadatas,
         )
 
+    def get_embeddings(self, ids: list[str]) -> dict[str, list[float]]:
+        result = self.collection.get(ids=ids, include=["embeddings"])
+        return {item_id: list(vector) for item_id, vector in zip(result["ids"], result["embeddings"], strict=False)}
+
+    def list_ids(self) -> set[str]:
+        return set(self.collection.get(include=[])["ids"])
+
+    def update_document_metadata(self, document_id: str, updates: dict) -> int:
+        """Altera campos dos metadados de todas as entradas de um documento (ex.: o nome); devolve quantas."""
+        result = self.collection.get(where={"document_id": document_id}, include=["metadatas"])
+        if not result["ids"]:
+            return 0
+        self.collection.update(ids=result["ids"], metadatas=[{**meta, **updates} for meta in result["metadatas"]])
+        return len(result["ids"])
+
     def delete_document(self, document_id: str) -> None:
         self.collection.delete(where={"document_id": document_id})
 
@@ -52,8 +67,10 @@ class VectorStore:
         query_embedding: list[float],
         top_k: int,
         document_id: str | None = None,
+        where: dict | None = None,
     ) -> list[dict]:
-        where = {"document_id": document_id} if document_id else None
+        """`where` (filtro do Chroma, ver SearchFilters.to_chroma_where) tem prioridade sobre document_id."""
+        where = where or ({"document_id": document_id} if document_id else None)
         result = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,

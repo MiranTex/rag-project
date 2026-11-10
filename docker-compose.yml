@@ -2,6 +2,7 @@ services:
   chroma:
     image: chromadb/chroma:0.5.5
     container_name: rag_chroma
+    restart: unless-stopped
     ports:
       - "8001:8000"
     environment:
@@ -10,10 +11,45 @@ services:
     volumes:
       - chroma_data:/chroma/chroma
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8000/api/v1/heartbeat"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8000"]
       interval: 10s
       timeout: 5s
       retries: 10
 
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: rag_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - LM_STUDIO_BASE_URL=http://host.docker.internal:1234/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/uploads:/app/data/uploads
+      - ./data/exports:/app/data/exports
+      - backend_storage:/app/backend/storage
+      - hf_cache:/app/.cache/huggingface
+    depends_on:
+      chroma:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: rag_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
 volumes:
   chroma_data:
+  backend_storage:
+  hf_cache:

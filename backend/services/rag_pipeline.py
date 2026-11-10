@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from backend.models import RetrievalDiagnostic, SourceChunk
 from backend.services.embeddings import embed_query
 from backend.services.keyword_index import KeywordIndex
@@ -5,6 +7,7 @@ from backend.services.lmstudio_client import LMStudioClient
 from backend.services.memory import SessionMemory
 from backend.services.query_expansion import expand_query
 from backend.services.reranker import rerank_hybrid, scores_to_dict
+from backend.services.search_filters import SearchFilters
 from backend.services.text_processing import tokenize_text_set
 from backend.services.vector_store import VectorStore
 
@@ -132,6 +135,24 @@ class RagPipeline:
             self.memory_service.remember(session_id, question, answer)
         return answer, sources, diagnostics
 
+    def retrieve_sources(
+        self,
+        question: str,
+        top_k: int,
+        document_id: str | None = None,
+        retrieval_mode: str | None = None,
+        filters: SearchFilters | None = None,
+    ) -> list[SourceChunk]:
+        """Só retrieval + reranking, sem gerar resposta (usado pelas tools do agente)."""
+        sources, _ = self._retrieve_sources(
+            question=question,
+            top_k=top_k,
+            document_id=document_id,
+            retrieval_mode=retrieval_mode,
+            filters=filters,
+        )
+        return sources
+
     def _retrieve_sources(
         self,
         question: str,
@@ -140,8 +161,12 @@ class RagPipeline:
         rerank_weights: dict[str, float] | None = None,
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
+        filters: SearchFilters | None = None,
     ) -> tuple[list[SourceChunk], list[RetrievalDiagnostic]]:
         active_mode = retrieval_mode or self.retrieval_mode_default
+        filters = filters or SearchFilters()
+        if document_id and not filters.document_id:
+            filters = replace(filters, document_id=document_id)
         vector_limit = max(top_k * 2, top_k + 4)
         lexical_limit = keyword_top_k or max(top_k * self.keyword_candidate_multiplier, top_k + 4)
 
@@ -152,7 +177,7 @@ class RagPipeline:
             results = self.vector_store.query(
                 query_embedding=query_embedding,
                 top_k=vector_limit,
-                document_id=document_id,
+                where=filters.to_chroma_where(),
             )
             for item in results:
                 meta = item["metadata"]
@@ -164,7 +189,8 @@ class RagPipeline:
             lexical_results = self.keyword_index.search(
                 query_text=question,
                 top_k=lexical_limit,
-                document_id=document_id,
+                document_id=filters.document_id,
+                predicate=None if filters.is_empty() else filters.matches,
             )
             for item in lexical_results:
                 meta = item["metadata"]
@@ -461,6 +487,7 @@ class RagPipeline:
                 else None
             ),
             lexical_score=lexical_score,
+            section=meta.get("section"),
         )
 
     def _merge_candidate(
