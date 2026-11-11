@@ -6,7 +6,7 @@ tests/test_job_queue.py)."""
 
 from typing import Any, Protocol
 
-from backend.models import DocumentInfo, DocumentMetadata, Job, ReviewPage, User
+from backend.models import DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
 from backend.research.models import (
     AnswerFeedback,
     Comment,
@@ -175,3 +175,16 @@ class FeedbackRepository(Protocol):
     def list_recent(self, limit: int = 200, rating: int | None = None) -> list[AnswerFeedback]: ...
 
     def counts(self) -> dict[int, int]: ...
+
+
+class LLMSettingsRepository(Protocol):
+    """Fornecedores de LLM configurados na aplicação. No máximo um está ativo: guardar um com active=True
+    desativa os outros."""
+
+    def list_providers(self) -> list[LLMProviderConfig]: ...
+
+    def get(self, provider: str) -> LLMProviderConfig | None: ...
+
+    def get_active(self) -> LLMProviderConfig | None: ...
+
+    def save(self, config: LLMProviderConfig) -> None: ...

@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
+    # Fornecedor de LLM, chave e modelos escolhem-se na aplicação (Configurações → Modelo de linguagem). Estes
+    # valores só se usam enquanto não houver nada guardado lá (ver services/llm_providers.py).
     lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
     lm_studio_chat_model: str = "local-model"
     lm_studio_max_tokens: int = 900
@@ -98,7 +100,8 @@ class Settings(BaseSettings):
     rerank_weights_default: str ='{"vector": 0.45, "lexical": 0.20, "keyword": 0.20, "position": 0.10, "density": 0.05}'
     rerank_weights_grounding: str = '{"vector": 0.35, "lexical": 0.25, "keyword": 0.25, "position": 0.10, "density": 0.05}'
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": variáveis do .env que esta classe não conhece não impedem o arranque.
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     def parse_rerank_weights(self, profile: str = "default") -> dict[str, float]:
         raw = self.rerank_weights_default if profile == "default" else self.rerank_weights_grounding

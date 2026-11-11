@@ -376,6 +376,20 @@ export function updateUser(userId, changes) {
   return jsonRequest(`/users/${userId}`, "PATCH", changes, "Falha ao guardar utilizador");
 }
 
+// Fornecedor de LLM (OpenRouter, Anthropic, OpenAI, LM Studio, outro). As chaves nunca voltam completas.
+export function getLlmSettings() {
+  return jsonRequest("/settings/llm", "GET", undefined, "Falha ao carregar o modelo de linguagem");
+}
+
+// api_key: null mantém a chave guardada.
+export function saveLlmProvider(provider, body) {
+  return jsonRequest(`/settings/llm/${provider}`, "PUT", body, "Falha ao guardar o modelo de linguagem");
+}
+
+export function testLlmProvider(provider, body) {
+  return jsonRequest(`/settings/llm/${provider}/test`, "POST", body, "Falha ao testar o modelo de linguagem");
+}
+
 export function getSettings() {
   return jsonRequest("/settings", "GET", undefined, "Falha ao carregar as configurações");
 }

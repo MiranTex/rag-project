@@ -18,10 +18,20 @@ import {
   X,
 } from "lucide-react";
 
-function HealthDot({ label, ok }) {
+// Fornecedor de LLM ativo (de /health), mostrado no tooltip do indicador "Modelo".
+const PROVIDER_LABELS = {
+  openrouter: "OpenRouter",
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  lmstudio: "LM Studio",
+  custom: "API compatível com OpenAI",
+};
+
+function HealthDot({ label, ok, title }) {
   const color = ok === undefined ? "bg-stone-300 dark:bg-stone-600" : ok ? "bg-emerald-500" : "bg-red-500";
+  const name = title ? `${label}: ${title}` : label;
   return (
-    <span className="flex items-center gap-1.5" title={ok === false ? `${label} indisponível` : label}>
+    <span className="flex items-center gap-1.5" title={ok === false ? `${name} indisponível` : name}>
       <span className={`size-1.5 rounded-full ${color}`} />
       {label}
     </span>
@@ -174,7 +184,7 @@ export default function Sidebar({
 
         <footer className="flex items-center gap-4 border-t border-stone-200 dark:border-stone-800 px-4 py-3 text-xs text-stone-500 dark:text-stone-400">
           <HealthDot label="API" ok={health ? !health.offline : undefined} />
-          <HealthDot label="Modelo" ok={health?.lmstudio} />
+          <HealthDot label="Modelo" ok={health?.lmstudio} title={PROVIDER_LABELS[health?.llm_provider]} />
           <HealthDot label="Chroma" ok={health?.chroma} />
           <ThemeSwitch theme={theme} onThemeChange={onThemeChange} />
         </footer>

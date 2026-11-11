@@ -13,6 +13,7 @@ from backend.api.documents import router as documents_router
 from backend.api.exports import router as exports_router
 from backend.api.feedback import router as feedback_router
 from backend.api.health import router as health_router
+from backend.api.llm_settings import router as llm_settings_router
 from backend.api.research import router as research_router
 from backend.api.research_projects import router as research_projects_router
 from backend.api.settings import router as settings_router
@@ -57,6 +58,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(llm_settings_router)
 app.include_router(settings_router)
 app.include_router(research_router)
 app.include_router(research_projects_router)

@@ -25,7 +25,7 @@ from sqlalchemy import (
     update,
 )
 
-from backend.models import DocumentInfo, DocumentMetadata, Job, ReviewPage, User
+from backend.models import DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
 
 metadata_obj = MetaData()
 
@@ -109,6 +109,18 @@ jobs = Table(
     Column("created_at", String(40), nullable=False),
     Column("started_at", String(40), nullable=True),
     Column("finished_at", String(40), nullable=True),
+)
+
+llm_providers = Table(
+    "llm_providers",
+    metadata_obj,
+    Column("provider", String(32), primary_key=True),
+    Column("api_key", Text, nullable=False, default=""),
+    Column("base_url", String(512), nullable=False, default=""),
+    Column("chat_model", String(255), nullable=False, default=""),
+    Column("utility_model", String(255), nullable=False, default=""),
+    Column("active", Boolean, nullable=False, default=False),
+    Column("updated_at", String(40), nullable=False),
 )
 
 ACTIVE_JOB_STATUSES = ("queued", "running")
@@ -370,3 +382,37 @@ class SqlJobQueue:
         with self.engine.connect() as conn:
             rows = conn.execute(select(jobs.c.status, func.count()).group_by(jobs.c.status)).all()
         return {status: count for status, count in rows}
+
+
+class SqlLLMSettingsRepository:
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    @staticmethod
+    def _to_model(row) -> LLMProviderConfig:
+        return LLMProviderConfig(**{k: v for k, v in row._mapping.items() if k != "updated_at"})
+
+    def list_providers(self) -> list[LLMProviderConfig]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(select(llm_providers).order_by(llm_providers.c.provider))
+            return [self._to_model(row) for row in rows]
+
+    def get(self, provider: str) -> LLMProviderConfig | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(select(llm_providers).where(llm_providers.c.provider == provider)).first()
+        return self._to_model(row) if row else None
+
+    def get_active(self) -> LLMProviderConfig | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(select(llm_providers).where(llm_providers.c.active.is_(True)).limit(1)).first()
+        return self._to_model(row) if row else None
+
+    def save(self, config: LLMProviderConfig) -> None:
+        values = {**config.model_dump(), "updated_at": _now()}
+        with self.engine.begin() as conn:
+            # Só um fornecedor ativo de cada vez.
+            if config.active:
+                conn.execute(update(llm_providers).where(llm_providers.c.provider != config.provider).values(active=False))
+            result = conn.execute(update(llm_providers).where(llm_providers.c.provider == config.provider).values(**values))
+            if result.rowcount == 0:
+                conn.execute(insert(llm_providers).values(**values))

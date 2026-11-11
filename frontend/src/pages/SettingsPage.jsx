@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, RotateCcw, Save } from "lucide-react";
 import { getSettings, resetSetting, saveSettings } from "../api";
+import LlmProviderSettings from "../components/LlmProviderSettings";
 import PageShell from "../components/PageShell";
 
 const WEIGHT_FACTORS = [
@@ -172,6 +173,7 @@ export default function SettingsPage({ onOpenSidebar, onSaved }) {
         )
       }
     >
+      <LlmProviderSettings onSaved={onSaved} />
       {error && <p className="mb-4 text-sm text-red-700 dark:text-red-300">{error}</p>}
       {!settings && !error && <Loader2 className="size-5 animate-spin text-stone-400" />}
       {groups.map((group) => (

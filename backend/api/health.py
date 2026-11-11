@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from backend.config import get_settings
-from backend.dependencies import get_job_queue, get_lmstudio_client, get_vector_store
+from backend.dependencies import active_llm_config, get_job_queue, get_lmstudio_client, get_vector_store
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -26,12 +26,19 @@ def health() -> dict:
     except Exception:
         jobs = None
 
+    try:
+        llm_provider = active_llm_config().provider
+    except Exception:
+        llm_provider = None
+
     status = "ok" if lmstudio_ok and chroma_ok else "degraded"
     settings = get_settings()
     return {
         "status": status,
         "lmstudio": lmstudio_ok,
         "chroma": chroma_ok,
+        # Fornecedor de LLM ativo (ver /settings/llm).
+        "llm_provider": llm_provider,
         # Trabalhos por estado (queued, running, failed, done); None se a base de dados não responder.
         "jobs": jobs,
         "rerank_profiles": {

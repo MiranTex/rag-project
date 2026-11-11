@@ -297,3 +297,15 @@ class Job(BaseModel):
     created_at: str
     started_at: str | None = None
     finished_at: str | None = None
+
+
+class LLMProviderConfig(BaseModel):
+    """Ligação a um fornecedor de LLM guardada na aplicação (ver services/llm_providers.py)."""
+
+    provider: str
+    api_key: str = ""
+    base_url: str = ""
+    chat_model: str = ""
+    # Modelo pequeno para tarefas curtas (guarda, ficha, pesquisa); vazio usa o chat_model.
+    utility_model: str = ""
+    active: bool = False

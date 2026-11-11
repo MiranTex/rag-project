@@ -13,6 +13,7 @@ from backend.repositories.contracts import (
     ExtractionRepository,
     FeedbackRepository,
     JobQueue,
+    LLMSettingsRepository,
     ResearchRepository,
     SettingsRepository,
     UserRepository,
@@ -24,6 +25,7 @@ from backend.repositories.sql import (
     SqlDocumentRepository,
     SqlExtractionRepository,
     SqlJobQueue,
+    SqlLLMSettingsRepository,
     SqlSettingsRepository,
     SqlUserRepository,
     create_db_engine,
@@ -33,7 +35,8 @@ from backend.services.document_renamer import DocumentRenamer
 from backend.services.document_types import DocumentTypes, load_document_types
 from backend.services.export_store import ExportStore
 from backend.services.keyword_index import KeywordIndex
-from backend.services.lmstudio_client import LMStudioClient
+from backend.models import LLMProviderConfig
+from backend.services.llm_providers import ConfigurableLLM, env_fallback
 from backend.services.memory import SessionMemory
 from backend.services.rag_pipeline import RagPipeline
 from backend.services.vector_store import VectorStore
@@ -166,19 +169,18 @@ def get_keyword_index() -> KeywordIndex:
 
 
 @lru_cache(maxsize=1)
-def get_lmstudio_client() -> LMStudioClient:
-    settings = get_settings()
-    if settings.open_router_api_key:
-        return LMStudioClient(
-            base_url=settings.open_router_base_url,
-            model=settings.open_router_chat_model,
-            api_key=settings.open_router_api_key,
-        )
-    return LMStudioClient(
-        base_url=settings.lm_studio_base_url,
-        model=settings.lm_studio_chat_model,
-        max_tokens=settings.lm_studio_max_tokens,
-    )
+def get_llm_settings() -> LLMSettingsRepository:
+    return SqlLLMSettingsRepository(get_database())
+
+
+def active_llm_config() -> LLMProviderConfig:
+    """Fornecedor de LLM escolhido na aplicação (Configurações → Modelo de linguagem); sem nenhum, o do .env."""
+    return get_llm_settings().get_active() or env_fallback(get_settings())
+
+
+@lru_cache(maxsize=1)
+def get_lmstudio_client() -> ConfigurableLLM:
+    return ConfigurableLLM(active_llm_config, role="chat")
 
 
 @lru_cache(maxsize=1)
@@ -208,17 +210,11 @@ def get_tool_registry() -> ToolRegistry:
 
 
 @lru_cache(maxsize=1)
-def get_utility_llm() -> LMStudioClient:
+def get_utility_llm() -> ConfigurableLLM:
     """Modelo pequeno e barato para tarefas curtas e estruturadas (classificar, extrair campos), que não
-    respondem ao utilizador. Também aceita tool_choice forçado, ao contrário de alguns modelos de chat."""
-    settings = get_settings()
-    if settings.open_router_api_key:
-        return LMStudioClient(
-            base_url=settings.open_router_base_url,
-            model=settings.guard_model,
-            api_key=settings.open_router_api_key,
-        )
-    return get_lmstudio_client()
+    respondem ao utilizador. Também aceita tool_choice forçado, ao contrário de alguns modelos de chat.
+    Sem modelo utilitário configurado, usa o modelo de chat."""
+    return ConfigurableLLM(active_llm_config, role="utility")
 
 
 @lru_cache(maxsize=1)
