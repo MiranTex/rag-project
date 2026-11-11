@@ -1,5 +1,6 @@
 import logging
 from functools import lru_cache
+from pathlib import Path
 
 from sqlalchemy import Engine
 
@@ -33,6 +34,7 @@ from backend.services.document_types import DocumentTypes, load_document_types
 from backend.services.export_store import ExportStore
 from backend.services.keyword_index import KeywordIndex
 from backend.services.lmstudio_client import LMStudioClient
+from backend.services.memory import SessionMemory
 from backend.services.rag_pipeline import RagPipeline
 from backend.services.vector_store import VectorStore
 
@@ -175,12 +177,14 @@ def get_lmstudio_client() -> LMStudioClient:
     return LMStudioClient(
         base_url=settings.lm_studio_base_url,
         model=settings.lm_studio_chat_model,
+        max_tokens=settings.lm_studio_max_tokens,
     )
 
 
 @lru_cache(maxsize=1)
 def get_rag_pipeline() -> RagPipeline:
     settings = get_settings()
+    memory_dir = Path(settings.upload_dir) / "memory"
     return RagPipeline(
         embedding_model=settings.embedding_model,
         vector_store=get_vector_store(),
@@ -189,6 +193,7 @@ def get_rag_pipeline() -> RagPipeline:
         rerank_weights=settings.parse_rerank_weights("default"),
         retrieval_mode_default=settings.retrieval_mode_default,
         keyword_candidate_multiplier=settings.keyword_candidate_multiplier,
+        memory_service=SessionMemory(storage_dir=memory_dir),
     )
 
 

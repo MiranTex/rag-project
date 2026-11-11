@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
     lm_studio_chat_model: str = "local-model"
+    lm_studio_max_tokens: int = 900
     open_router_api_key: str = ""
     open_router_base_url: str = "https://openrouter.ai/api/v1"
     open_router_chat_model: str = "anthropic/claude-sonnet-5.5"

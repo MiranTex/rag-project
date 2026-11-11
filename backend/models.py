@@ -144,6 +144,7 @@ class AskRequest(BaseModel):
     keyword_top_k: int | None = Field(default=None, ge=1, le=50)
     # Projeto de pesquisa: a pergunta fica limitada aos documentos fixados nele.
     project_id: str | None = None
+    session_id: str | None = None
 
 
 class SourceChunk(BaseModel):

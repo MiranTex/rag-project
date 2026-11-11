@@ -108,6 +108,19 @@ function Workspace({ session, authConfig, onLogout }) {
   const [asking, setAsking] = useState(false);
   const abortRef = useRef(null);
   const [multiQuery, setMultiQuery] = useState(false);
+  // Identifica a conversa na memória de sessão do backend; por utilizador, como o histórico do chat.
+  const [sessionId] = useState(() => {
+    const key = `rag-study-session-id:${session.user.user_id}`;
+    const created = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const existing = localStorage.getItem(key);
+      if (existing) return existing;
+      localStorage.setItem(key, created);
+    } catch {
+      // Sem localStorage a memória dura só enquanto a página estiver aberta.
+    }
+    return created;
+  });
   const [mode, setMode] = useState("agent");
   const [profiles, setProfiles] = useState([]);
   const [profile, setProfile] = useState("");
@@ -333,6 +346,7 @@ function Workspace({ session, authConfig, onLogout }) {
           project_id: activeProjectId || null,
           include_debug: true,
           multi_query: multiQuery,
+          session_id: sessionId,
         },
         {
           onSources: (sources) => {

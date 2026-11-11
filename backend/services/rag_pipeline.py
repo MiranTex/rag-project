@@ -4,6 +4,7 @@ from backend.models import RetrievalDiagnostic, SourceChunk
 from backend.services.embeddings import embed_query
 from backend.services.keyword_index import KeywordIndex
 from backend.services.lmstudio_client import LMStudioClient
+from backend.services.memory import SessionMemory
 from backend.services.query_expansion import expand_query
 from backend.services.reranker import rerank_hybrid, scores_to_dict
 from backend.services.search_filters import SearchFilters
@@ -15,7 +16,7 @@ SYSTEM_PROMPT = """
 És um assistente de estudo em PT-PT.
 Responde apenas com base no contexto fornecido.
 Se o contexto não for suficiente, diz claramente que não tens informação suficiente.
-Inclui sempre uma resposta objetiva e curta.
+Quando houver contexto suficiente, responde com detalhe útil, estrutura clara e boa legibilidade.
 """.strip()
 
 
@@ -31,21 +32,39 @@ def score_candidate(question: str, chunk_text: str, vector_score: float) -> floa
     return vector_score + overlap_bonus
 
 
-def build_answer_prompt(question: str, context_text: str) -> str:
+def build_answer_prompt(question: str, context_text: str, memory_context: str | None = None) -> str:
+    memory_block = ""
+    if memory_context:
+        memory_block = (
+            "Memória da sessão:\n"
+            "Interações recentes:\n"
+            f"{memory_context}\n\n"
+        )
+
     return (
+        f"{memory_block}"
         "Pergunta do utilizador:\n"
         f"{question}\n\n"
         "Contexto recuperado:\n"
         f"{context_text}\n\n"
         "Instruções:\n"
-        "- Responde em PT-PT, de forma objetiva e concisa.\n"
+        "- Responde em PT-PT, com detalhe suficiente para ser útil, sem te limitares a uma resposta demasiado curta.\n"
         "- Baseia-te apenas no contexto recuperado.\n"
         "- Não inventes factos. Se o contexto não for suficiente, diz claramente que não tens informação suficiente.\n"
-        "- Quando houver contexto relevante, resume em frases curtas e cita sempre a fonte e a página no fim.\n"
+        "- Quando houver contexto relevante, explica os pontos principais em 2 a 4 parágrafos ou numa lista curta, conforme fizer mais sentido para a pergunta.\n"
+        "- Usa Markdown simples para organizar a resposta.\n"
+        "- Cita sempre a fonte e a página no fim.\n"
         "- Formato obrigatório:\n"
-        "  Resposta: <conteúdo objetivo>\n"
-        "  Fontes usadas: [ficheiro, p.X], [ficheiro, p.Y]\n"
-        "- Se não houver contexto suficiente: Resposta: Informação insuficiente no contexto recuperado."
+        "  ### Resposta\n"
+        "  <explicação objetiva, mas desenvolvida e bem estruturada>\n\n"
+        "  ### Fontes usadas\n"
+        "  - [ficheiro, p.X]\n"
+        "  - [ficheiro, p.Y]\n"
+        "- Se não houver contexto suficiente, responde exatamente com esta estrutura:\n"
+        "  ### Resposta\n"
+        "  Informação insuficiente no contexto recuperado.\n\n"
+        "  ### Fontes usadas\n"
+        "  - Nenhuma"
     )
 
 
@@ -59,6 +78,7 @@ class RagPipeline:
         rerank_weights: dict[str, float] | None = None,
         retrieval_mode_default: str = "hybrid",
         keyword_candidate_multiplier: int = 2,
+        memory_service: SessionMemory | None = None,
     ) -> None:
         self.embedding_model = embedding_model
         self.vector_store = vector_store
@@ -67,6 +87,7 @@ class RagPipeline:
         self.rerank_weights = rerank_weights
         self.retrieval_mode_default = retrieval_mode_default
         self.keyword_candidate_multiplier = max(keyword_candidate_multiplier, 1)
+        self.memory_service = memory_service
 
     def ask(
         self,
@@ -76,6 +97,7 @@ class RagPipeline:
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
         filters: SearchFilters | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, list[SourceChunk]]:
         answer, sources, _ = self.ask_with_debug(
             question=question,
@@ -84,7 +106,10 @@ class RagPipeline:
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
             filters=filters,
+            session_id=session_id,
         )
+        if self.memory_service is not None and session_id:
+            self.memory_service.remember(session_id, question, answer)
         return answer, sources
 
     def ask_with_debug(
@@ -96,6 +121,7 @@ class RagPipeline:
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
         filters: SearchFilters | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, list[SourceChunk], list[RetrievalDiagnostic]]:
         user_prompt, sources, diagnostics = self.build_user_prompt_with_debug(
             question=question,
@@ -105,9 +131,12 @@ class RagPipeline:
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
             filters=filters,
+            session_id=session_id,
         )
 
         answer = self.lmstudio_client.chat(SYSTEM_PROMPT, user_prompt)
+        if self.memory_service is not None and session_id:
+            self.memory_service.remember(session_id, question, answer)
         return answer, sources, diagnostics
 
     def retrieve_sources(
@@ -207,6 +236,7 @@ class RagPipeline:
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
         filters: SearchFilters | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, list[SourceChunk]]:
         user_prompt, sources, _ = self.build_user_prompt_with_debug(
             question=question,
@@ -215,6 +245,7 @@ class RagPipeline:
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
             filters=filters,
+            session_id=session_id,
         )
         return user_prompt, sources
 
@@ -227,6 +258,7 @@ class RagPipeline:
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
         filters: SearchFilters | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, list[SourceChunk], list[RetrievalDiagnostic]]:
         sources, diagnostics = self._retrieve_sources(
             question=question,
@@ -245,7 +277,12 @@ class RagPipeline:
             )
 
         context_text = "\n\n".join(context_blocks) if context_blocks else "Sem contexto recuperado."
-        user_prompt = build_answer_prompt(question, context_text)
+        memory_context = ""
+        if self.memory_service is not None and session_id:
+            memory_context = self.memory_service.get_context(session_id)
+            if not memory_context:
+                memory_context = "Sem memória registada ainda."
+        user_prompt = build_answer_prompt(question, context_text, memory_context=memory_context)
         return user_prompt, sources, diagnostics
 
     def ask_stream(
@@ -256,6 +293,7 @@ class RagPipeline:
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
         filters: SearchFilters | None = None,
+        session_id: str | None = None,
     ) -> tuple[list[str], list[SourceChunk]]:
         tokens, sources, _ = self.ask_stream_with_debug(
             question=question,
@@ -264,6 +302,7 @@ class RagPipeline:
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
             filters=filters,
+            session_id=session_id,
         )
         return tokens, sources
 
@@ -276,6 +315,7 @@ class RagPipeline:
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
         filters: SearchFilters | None = None,
+        session_id: str | None = None,
     ) -> tuple[list[str], list[SourceChunk], list[RetrievalDiagnostic]]:
         user_prompt, sources, diagnostics = self.build_user_prompt_with_debug(
             question=question,
@@ -285,8 +325,11 @@ class RagPipeline:
             retrieval_mode=retrieval_mode,
             keyword_top_k=keyword_top_k,
             filters=filters,
+            session_id=session_id,
         )
         tokens = list(self.lmstudio_client.chat_stream(SYSTEM_PROMPT, user_prompt))
+        if self.memory_service is not None and session_id:
+            self.memory_service.remember(session_id, question, "".join(tokens))
         return tokens, sources, diagnostics
 
     # ------------------------------------------------------------------
@@ -378,6 +421,7 @@ class RagPipeline:
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
         filters: SearchFilters | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, list[SourceChunk], list[RetrievalDiagnostic], list[str]]:
         """Full Multi-Query RAG: expand → retrieve → rerank → answer."""
         sources, diagnostics, expanded = self._retrieve_sources_multi_query(
@@ -395,8 +439,15 @@ class RagPipeline:
             for c in sources
         ]
         context_text = "\n\n".join(context_blocks) if context_blocks else "Sem contexto recuperado."
-        user_prompt = build_answer_prompt(question, context_text)
+        memory_context = ""
+        if self.memory_service is not None and session_id:
+            memory_context = self.memory_service.get_context(session_id)
+            if not memory_context:
+                memory_context = "Sem memória registada ainda."
+        user_prompt = build_answer_prompt(question, context_text, memory_context=memory_context)
         answer = self.lmstudio_client.chat(SYSTEM_PROMPT, user_prompt)
+        if self.memory_service is not None and session_id:
+            self.memory_service.remember(session_id, question, answer)
         return answer, sources, diagnostics, expanded
 
     def ask_multi_query_stream(
@@ -409,6 +460,7 @@ class RagPipeline:
         retrieval_mode: str | None = None,
         keyword_top_k: int | None = None,
         filters: SearchFilters | None = None,
+        session_id: str | None = None,
     ) -> tuple[list[str], list[SourceChunk], list[RetrievalDiagnostic], list[str]]:
         """Streaming variant of Multi-Query RAG."""
         sources, diagnostics, expanded = self._retrieve_sources_multi_query(
@@ -426,8 +478,15 @@ class RagPipeline:
             for c in sources
         ]
         context_text = "\n\n".join(context_blocks) if context_blocks else "Sem contexto recuperado."
-        user_prompt = build_answer_prompt(question, context_text)
+        memory_context = ""
+        if self.memory_service is not None and session_id:
+            memory_context = self.memory_service.get_context(session_id)
+            if not memory_context:
+                memory_context = "Sem memória registada ainda."
+        user_prompt = build_answer_prompt(question, context_text, memory_context=memory_context)
         tokens = list(self.lmstudio_client.chat_stream(SYSTEM_PROMPT, user_prompt))
+        if self.memory_service is not None and session_id:
+            self.memory_service.remember(session_id, question, "".join(tokens))
         return tokens, sources, diagnostics, expanded
 
     @staticmethod
