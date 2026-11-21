@@ -42,16 +42,6 @@ def file_sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def save_uploaded_file(upload_dir: str, stored_name: str, content: bytes) -> Path:
-    safe_name = stored_name.replace("/", "_").replace("\\", "_")
-    target = Path(upload_dir) / safe_name
-    # Escrita atómica: um leitor concorrente nunca vê o ficheiro truncado a meio da escrita.
-    tmp = target.with_name(f".{target.name}.tmp")
-    tmp.write_bytes(content)
-    tmp.replace(target)
-    return target
-
-
 def count_pages(pdf_path: Path) -> int:
     return len(PdfReader(str(pdf_path)).pages)
 

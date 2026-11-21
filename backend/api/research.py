@@ -12,9 +12,10 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 from backend.agent.tools.base import ToolError
+from backend.api.downloads import download_response
 from backend.api.security import require
 from backend.auth.permissions import RESEARCH_USE, AuthenticatedUser
 from backend.config import get_settings
@@ -45,6 +46,7 @@ from backend.research.models import (
 from backend.research.writing import skeleton, skeleton_markdown
 from backend.services.document_writer import write_docx, write_markdown
 from backend.services.embeddings import embed_query
+from backend.services.object_storage import storage_for
 from backend.services.search_filters import SearchFilters
 
 router = APIRouter(prefix="/research", tags=["research"])
@@ -144,12 +146,12 @@ def get_page(document_id: str, page_number: int) -> dict:
 
 
 @router.get("/documents/{document_id}/pdf", dependencies=[Depends(can_research)])
-def get_pdf(document_id: str) -> FileResponse:
+def get_pdf(document_id: str) -> Response:
     info = _indexed(document_id)
-    path = Path(get_settings().upload_dir) / (info.storage_name or info.filename)
-    if not path.exists():
+    content = storage_for(get_settings(), "uploads").get(info.storage_name or info.filename)
+    if content is None:
         raise HTTPException(status_code=404, detail="Ficheiro original não encontrado.")
-    return FileResponse(path, media_type="application/pdf", filename=info.filename)
+    return download_response(content, info.filename, "application/pdf")
 
 
 # ---- Pesquisas guardadas ----
@@ -318,7 +320,8 @@ def work_types() -> list[dict]:
 @router.post("/export")
 def export(payload: ExportRequest, user: AuthenticatedUser = Depends(can_research)) -> dict:
     """Guarda texto (esqueleto, estado da arte, bibliografia) como Word ou markdown nos exports da pessoa."""
-    path = get_export_store().for_owner(user.user_id).reserve_path(payload.title, payload.format)
     writer = write_docx if payload.format == "docx" else write_markdown
-    writer(path, payload.title, payload.markdown)
-    return {"name": path.name, "format": payload.format}
+    name = get_export_store().for_owner(user.user_id).create(
+        payload.title, payload.format, lambda path: writer(path, payload.title, payload.markdown)
+    )
+    return {"name": name, "format": payload.format}

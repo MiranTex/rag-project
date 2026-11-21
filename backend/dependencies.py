@@ -1,6 +1,5 @@
 import logging
 from functools import lru_cache
-from pathlib import Path
 
 from sqlalchemy import Engine
 
@@ -38,6 +37,7 @@ from backend.services.keyword_index import KeywordIndex
 from backend.models import LLMProviderConfig
 from backend.services.llm_providers import ConfigurableLLM, env_fallback
 from backend.services.memory import SessionMemory
+from backend.services.object_storage import storage_for
 from backend.services.rag_pipeline import RagPipeline
 from backend.services.vector_store import VectorStore
 
@@ -186,7 +186,6 @@ def get_lmstudio_client() -> ConfigurableLLM:
 @lru_cache(maxsize=1)
 def get_rag_pipeline() -> RagPipeline:
     settings = get_settings()
-    memory_dir = Path(settings.upload_dir) / "memory"
     return RagPipeline(
         embedding_model=settings.embedding_model,
         vector_store=get_vector_store(),
@@ -195,13 +194,14 @@ def get_rag_pipeline() -> RagPipeline:
         rerank_weights=settings.parse_rerank_weights("default"),
         retrieval_mode_default=settings.retrieval_mode_default,
         keyword_candidate_multiplier=settings.keyword_candidate_multiplier,
-        memory_service=SessionMemory(storage_dir=memory_dir),
+        # Memória das conversas em uploads/memory/ (no disco local ou no storage S3).
+        memory_service=SessionMemory(storage=storage_for(settings, "uploads"), prefix="memory"),
     )
 
 
 @lru_cache(maxsize=1)
 def get_export_store() -> ExportStore:
-    return ExportStore(get_settings().export_dir)
+    return ExportStore(storage_for(get_settings(), "exports"))
 
 
 @lru_cache(maxsize=1)

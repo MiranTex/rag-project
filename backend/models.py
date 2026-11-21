@@ -14,7 +14,7 @@ class DocumentInfo(BaseModel):
     # Nome no sistema: o que aparece na lista, nas fontes e nas citações (ver document_naming.py).
     filename: str
     original_filename: str = ""
-    # Nome do PDF em disco, dentro de UPLOAD_DIR. Vazio nos documentos antigos, guardados com o nome original.
+    # Nome do PDF no storage (pasta UPLOAD_DIR ou prefixo uploads/ do S3). Vazio nos documentos antigos, guardados com o nome original.
     storage_name: str = ""
     name_source: NameSource = "original"
     sha256: str
