@@ -558,7 +558,70 @@ O upload e a aprovação já não esperam pelo OCR nem pelos embeddings.
 
 - **Um trabalho de cada vez por documento:** um pedido com outro já em curso devolve 409.
 - **Remover um documento:** cancela o trabalho que estiver em fila.
-- **Workers:** correm dentro da API (`INDEXING_WORKERS`, por defeito 1). Para os separar, põe-se `INDEXING_WORKERS=0` na API e corre-se `python -m backend.worker` noutro processo ou contentor, com a mesma `DATABASE_URL`, o mesmo `UPLOAD_DIR` e o mesmo Chroma.
+- **Workers:** correm dentro da API (`INDEXING_WORKERS`, por defeito 1). Para os separar, põe-se `INDEXING_WORKERS=0` na API e corre-se `python -m backend.worker` noutro processo ou contentor, com a mesma `DATABASE_URL`, os mesmos ficheiros (`UPLOAD_DIR` ou `STORAGE_*`) e os mesmos vetores (Chroma ou pgvector).
 - **Trabalhos interrompidos:** os que ficaram `running` por um processo que morreu voltam à fila no arranque. São os deste contentor e os parados há mais de `JOB_STALE_MINUTES`.
 - **Estado da fila:** `GET /health` mostra os trabalhos por estado.
 - **Interface:** a lista atualiza-se sozinha enquanto houver documentos em processamento, e avisa quando um documento fica pronto para revisão, é indexado ou falha.
+
+## Deploy no Base Stack
+
+No Base Stack os serviços são contentores sem disco persistente: cada deploy arranca da imagem. Por isso, tudo o que tem de sobreviver vai para addons do ambiente:
+
+| O quê | Local (docker-compose) | Base Stack |
+|---|---|---|
+| Registo, extrações, fila, utilizadores | SQLite em `backend/storage` | Addon PostgreSQL (`DATABASE_URL`) |
+| Vetores (excertos e índice de documentos) | Chroma | O mesmo PostgreSQL, com pgvector (`VECTOR_STORE=pgvector`, automático com PostgreSQL) |
+| PDFs, exports, memória das conversas | `data/uploads`, `data/exports` | Addon storage S3 (`STORAGE_*`), prefixos `uploads/` e `exports/` |
+| Modelo de embeddings | Volume `hf_cache` | Embutido na imagem na construção |
+
+### Addons
+
+- **PostgreSQL com a opção vector** (PostgreSQL 17 com pgvector). Injeta `DATABASE_URL=postgres://…?sslmode=require`; a aplicação converte-a para `postgresql+psycopg://` e, no arranque, a migração `0006` cria a extensão `vector` e a tabela `vector_embeddings`.
+- **Storage** com o prefixo `STORAGE`. Injeta `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID` e `STORAGE_SECRET_ACCESS_KEY` (o `STORAGE_URL` não é usado). O bucket já existe.
+
+### Serviços
+
+| Serviço | Imagem | Porta | Health | Memória |
+|---|---|---|---|---|
+| `rag-api` | `registry.cloud.aplustech.cv/morabeza-erp/rag-api` | 8000 (ou a `PORT` injetada) | `/health` | ~2 GB (modelo de embeddings, torch e OCR) |
+| `rag-web` | `registry.cloud.aplustech.cv/morabeza-erp/rag-web` | 80 | `/` | pouca (nginx com ficheiros estáticos) |
+
+Variáveis e segredos do `rag-api`, além das dos addons:
+
+| Variável | Valor |
+|---|---|
+| `AUTH_SECRET_KEY` (segredo) | `python -c "import secrets; print(secrets.token_urlsafe(32))"`; sem ela, as sessões caem a cada deploy |
+| `AUTH_BOOTSTRAP_ADMIN_USERNAME` | `admin` (ou outro) |
+| `AUTH_BOOTSTRAP_ADMIN_PASSWORD` (segredo) | Palavra-passe do primeiro administrador, criado só com a base vazia |
+| `CORS_ORIGINS` | URL público do `rag-web` (ex.: `https://rag.exemplo.cv`) |
+
+- **LLM:** não há LM Studio no servidor. O fornecedor (OpenRouter, Anthropic…), a chave e os modelos escolhem-se na aplicação, em Configurações → Modelo de linguagem (ou `OPEN_ROUTER_API_KEY` até haver algo guardado). Sem LLM configurado a API arranca na mesma; o `/health` responde `degraded` mas com HTTP 200.
+- **Workers:** a fila corre dentro da API (`INDEXING_WORKERS=1`). Um `rag-worker` à parte (`python -m backend.worker`, com `INDEXING_WORKERS=0` na API) usaria os mesmos addons.
+
+### Construir e publicar as imagens
+
+O servidor é Linux/amd64; num Mac com Apple Silicon a imagem tem de ser construída para essa plataforma. O URL da API fica embutido no bundle do frontend, por isso o `rag-web` constrói-se com o URL público do `rag-api`:
+
+```bash
+docker build --platform linux/amd64 -f backend/Dockerfile \
+  -t registry.cloud.aplustech.cv/morabeza-erp/rag-api:1.0.0 .
+docker build --platform linux/amd64 \
+  --build-arg VITE_API_BASE=https://rag-api.exemplo.cv \
+  -t registry.cloud.aplustech.cv/morabeza-erp/rag-web:1.0.0 frontend
+docker push registry.cloud.aplustech.cv/morabeza-erp/rag-api:1.0.0
+docker push registry.cloud.aplustech.cv/morabeza-erp/rag-web:1.0.0
+```
+
+O `EMBEDDING_MODEL` embutido é o de `--build-arg EMBEDDING_MODEL=…` (por defeito o `paraphrase-multilingual-MiniLM-L12-v2`); tem de ser o mesmo que a API usa.
+
+### Testes contra pgvector e S3
+
+Os testes de contrato dos vetores (`tests/test_vector_store_contract.py`) correm contra um Chroma em memória e, com `TEST_DATABASE_URL`, contra um PostgreSQL com pgvector. Os do storage (`tests/test_object_storage.py`) correm contra o disco, contra o `moto` se estiver instalado e contra um S3 real com `TEST_S3_ENDPOINT`:
+
+```bash
+docker network create rag-test
+docker run -d --rm --name pgv --network rag-test -e POSTGRES_PASSWORD=rag pgvector/pgvector:0.8.0-pg17
+docker run --rm --network rag-test -e TEST_DATABASE_URL=postgresql+psycopg://postgres:rag@pgv:5432/postgres \
+  rag-project-backend pytest -q
+docker rm -f pgv && docker network rm rag-test
+```
