@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,9 @@ class Settings(BaseSettings):
     chroma_host: str = "127.0.0.1"
     chroma_port: int = 8001
     chroma_collection: str = "rag_documents"
+    # Onde ficam os vetores: chroma (servidor Chroma) ou pgvector (tabela na base de dados PostgreSQL).
+    # Vazio: pgvector quando DATABASE_URL é PostgreSQL, chroma nos outros casos (ex.: SQLite no docker-compose).
+    vector_store: str = ""
 
     top_k: int = 4
     retrieval_mode_default: str = "hybrid"
@@ -37,6 +41,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = 150
     upload_dir: str = "data/uploads"
     # Base de dados (registo, extrações, fila de trabalhos): sqlite:///… ou postgresql+psycopg://…
+    # Aceita também postgres://… e postgresql://… (o formato dos addons), convertidos para postgresql+psycopg://.
     database_url: str = "sqlite:///backend/storage/rag.db"
     # Workers da fila de extração/indexação dentro da API; 0 se correrem noutro processo (python -m backend.worker).
     indexing_workers: int = 1
@@ -44,6 +49,13 @@ class Settings(BaseSettings):
     # Trabalhos "running" há mais do que isto voltam à fila (worker que morreu a meio).
     job_stale_minutes: int = 60
     export_dir: str = "data/exports"
+    # Storage compatível com S3 para os ficheiros (PDFs, exports, memória das conversas). Com STORAGE_ENDPOINT
+    # vazio, os ficheiros ficam em UPLOAD_DIR e EXPORT_DIR, no disco local.
+    storage_endpoint: str = ""
+    storage_bucket: str = ""
+    storage_region: str = "us-east-1"
+    storage_access_key_id: str = ""
+    storage_secret_access_key: str = ""
     agent_max_steps: int = 8
     guard_enabled: bool = True
     guard_model: str = "anthropic/claude-haiku-5.5"
@@ -103,6 +115,27 @@ class Settings(BaseSettings):
     # extra="ignore": variáveis do .env que esta classe não conhece não impedem o arranque.
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    @field_validator("database_url")
+    @classmethod
+    def normalize_database_url(cls, url: str) -> str:
+        """postgres://… e postgresql://… (sem driver) passam a usar o psycopg 3; o resto do URL (incluindo
+        ?sslmode=require) fica igual."""
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url.removeprefix(prefix)
+        return url
+
+    def uses_postgres(self) -> bool:
+        return self.database_url.startswith("postgresql")
+
+    def vector_backend(self) -> str:
+        backend = (self.vector_store or ("pgvector" if self.uses_postgres() else "chroma")).strip().lower()
+        if backend not in ("chroma", "pgvector"):
+            raise ValueError(f"VECTOR_STORE desconhecido: {self.vector_store!r} (chroma ou pgvector)")
+        if backend == "pgvector" and not self.uses_postgres():
+            raise ValueError("VECTOR_STORE=pgvector precisa de DATABASE_URL em PostgreSQL")
+        return backend
+
     def parse_rerank_weights(self, profile: str = "default") -> dict[str, float]:
         raw = self.rerank_weights_default if profile == "default" else self.rerank_weights_grounding
         parsed = json.loads(raw)
@@ -123,8 +156,9 @@ class Settings(BaseSettings):
 def get_env_settings() -> Settings:
     """Só o .env (e variáveis de ambiente): a infraestrutura (base de dados, Chroma, pastas) vem daqui."""
     settings = Settings()
-    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    Path(settings.export_dir).mkdir(parents=True, exist_ok=True)
+    if not settings.storage_endpoint:
+        Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+        Path(settings.export_dir).mkdir(parents=True, exist_ok=True)
     return settings
 
 
