@@ -1,7 +1,8 @@
 """Workers da fila num processo à parte: `python -m backend.worker`.
 
 Útil para separar o OCR e os embeddings da API (por exemplo noutro contentor, com INDEXING_WORKERS=0 na API).
-Precisa da mesma DATABASE_URL, do mesmo UPLOAD_DIR e do mesmo Chroma que a API.
+Precisa da mesma DATABASE_URL, dos mesmos ficheiros (UPLOAD_DIR ou STORAGE_*) e dos mesmos vetores (Chroma ou
+pgvector) que a API.
 """
 
 import logging

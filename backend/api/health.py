@@ -6,6 +6,13 @@ from backend.dependencies import active_llm_config, get_job_queue, get_lmstudio_
 router = APIRouter(prefix="/health", tags=["health"])
 
 
+def _vector_backend(settings) -> str | None:
+    try:
+        return settings.vector_backend()
+    except ValueError:
+        return None
+
+
 @router.get("")
 def health() -> dict:
     lmstudio_ok = False
@@ -36,7 +43,9 @@ def health() -> dict:
     return {
         "status": status,
         "lmstudio": lmstudio_ok,
+        # Armazenamento de vetores (Chroma ou pgvector, ver VECTOR_STORE); a chave mantém o nome antigo.
         "chroma": chroma_ok,
+        "vector_store": _vector_backend(settings),
         # Fornecedor de LLM ativo (ver /settings/llm).
         "llm_provider": llm_provider,
         # Trabalhos por estado (queued, running, failed, done); None se a base de dados não responder.

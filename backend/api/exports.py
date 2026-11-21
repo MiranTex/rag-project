@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
+from backend.api.downloads import download_response
 from backend.api.security import require
 from backend.auth.permissions import CHAT_USE, AuthenticatedUser
 from backend.dependencies import get_export_store
@@ -16,8 +17,9 @@ def list_exports(user: AuthenticatedUser = Depends(require(CHAT_USE))) -> list[E
 
 
 @router.get("/{name}")
-def download_export(name: str, user: AuthenticatedUser = Depends(require(CHAT_USE))) -> FileResponse:
-    path = get_export_store().for_owner(user.user_id).resolve(name)
-    if path is None:
+def download_export(name: str, user: AuthenticatedUser = Depends(require(CHAT_USE))) -> Response:
+    store = get_export_store().for_owner(user.user_id)
+    content = store.read(name)
+    if content is None:
         raise HTTPException(status_code=404, detail="Ficheiro não encontrado.")
-    return FileResponse(path, filename=path.name)
+    return download_response(content, name, store.media_type(name))

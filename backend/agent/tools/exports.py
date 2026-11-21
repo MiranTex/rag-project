@@ -32,12 +32,11 @@ class ExportCsvParams(BaseModel):
     side_effect=True,
 )
 def export_csv(params: ExportCsvParams, ctx: ToolContext) -> ToolResult:
-    path = ctx.export_store.reserve_path(params.filename, "csv")
-    write_csv(path, params.columns, params.rows)
+    name = ctx.export_store.create(params.filename, "csv", lambda path: write_csv(path, params.columns, params.rows))
     return ToolResult(
-        content={"file": path.name, "rows": len(params.rows), "columns": params.columns},
-        summary=f"{path.name} ({len(params.rows)} linhas)",
-        exports=[ExportRef(name=path.name, format="csv")],
+        content={"file": name, "rows": len(params.rows), "columns": params.columns},
+        summary=f"{name} ({len(params.rows)} linhas)",
+        exports=[ExportRef(name=name, format="csv")],
     )
 
 
@@ -60,13 +59,10 @@ class ExportDocumentParams(BaseModel):
     side_effect=True,
 )
 def export_document(params: ExportDocumentParams, ctx: ToolContext) -> ToolResult:
-    path = ctx.export_store.reserve_path(params.filename, params.format)
-    if params.format == "docx":
-        write_docx(path, params.title, params.content)
-    else:
-        write_markdown(path, params.title, params.content)
+    writer = write_docx if params.format == "docx" else write_markdown
+    name = ctx.export_store.create(params.filename, params.format, lambda path: writer(path, params.title, params.content))
     return ToolResult(
-        content={"file": path.name, "format": params.format},
-        summary=path.name,
-        exports=[ExportRef(name=path.name, format=params.format)],
+        content={"file": name, "format": params.format},
+        summary=name,
+        exports=[ExportRef(name=name, format=params.format)],
     )

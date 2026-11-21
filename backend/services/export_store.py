@@ -1,8 +1,14 @@
+import mimetypes
 import re
+import tempfile
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
+
+from backend.services.object_storage import LocalStorage, ObjectStorage
+
+_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 
 
 @dataclass
@@ -13,17 +19,18 @@ class ExportedFile:
 
 
 class ExportStore:
-    """Guarda os ficheiros gerados pelo agente num diretório próprio, sem nunca sobrescrever."""
+    """Guarda os ficheiros gerados pelo agente (no disco local ou no storage S3), sem nunca sobrescrever."""
 
-    def __init__(self, export_dir: str | Path) -> None:
-        self.root = Path(export_dir)
-        self.root.mkdir(parents=True, exist_ok=True)
+    def __init__(self, storage: ObjectStorage | str | Path, prefix: str = "") -> None:
+        # Uma pasta (str/Path) continua a funcionar: é o storage local nessa pasta.
+        self.storage = LocalStorage(storage) if isinstance(storage, str | Path) else storage
+        self.prefix = prefix
 
     def for_owner(self, owner_id: str) -> "ExportStore":
-        """Diretório só de um utilizador: cada um lista e descarrega apenas o que o agente gerou para si."""
+        """Pasta só de um utilizador: cada um lista e descarrega apenas o que o agente gerou para si."""
         if not re.fullmatch(r"[A-Za-z0-9_-]+", owner_id):
             raise ValueError(f"Id de utilizador inválido para exports: {owner_id!r}")
-        return ExportStore(self.root / owner_id)
+        return ExportStore(self.storage, f"{self.prefix}{owner_id}/")
 
     @staticmethod
     def _slugify(name: str) -> str:
@@ -31,29 +38,40 @@ class ExportStore:
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", ascii_name).strip("-._")
         return slug[:80] or "export"
 
-    def reserve_path(self, filename: str, extension: str) -> Path:
+    def _key(self, name: str) -> str:
+        return f"{self.prefix}{name}"
+
+    def reserve_name(self, filename: str, extension: str) -> str:
         stem = self._slugify(Path(filename).stem)
-        candidate = self.root / f"{stem}.{extension}"
+        candidate = f"{stem}.{extension}"
         counter = 2
-        while candidate.exists():
-            candidate = self.root / f"{stem}-{counter}.{extension}"
+        while self.storage.exists(self._key(candidate)):
+            candidate = f"{stem}-{counter}.{extension}"
             counter += 1
         return candidate
 
-    def resolve(self, name: str) -> Path | None:
-        path = (self.root / name).resolve()
-        if path.parent != self.root.resolve() or not path.is_file():
+    def create(self, filename: str, extension: str, write: Callable[[Path], None]) -> str:
+        """Escolhe um nome livre, escreve o ficheiro com write(caminho temporário) e guarda-o; devolve o nome."""
+        name = self.reserve_name(filename, extension)
+        with tempfile.TemporaryDirectory(prefix="rag-export-") as folder:
+            path = Path(folder) / name
+            write(path)
+            self.storage.put(self._key(name), path.read_bytes())
+        return name
+
+    def read(self, name: str) -> bytes | None:
+        """Conteúdo de um ficheiro deste utilizador; None se não existir ou se o nome sair da pasta."""
+        if not _NAME.fullmatch(name):
             return None
-        return path
+        return self.storage.get(self._key(name))
+
+    @staticmethod
+    def media_type(name: str) -> str:
+        return mimetypes.guess_type(name)[0] or "application/octet-stream"
 
     def list_files(self) -> list[ExportedFile]:
-        files = [p for p in self.root.iterdir() if p.is_file() and not p.name.startswith(".")]
-        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        files = sorted(self.storage.list(self.prefix), key=lambda item: item.modified, reverse=True)
         return [
-            ExportedFile(
-                name=p.name,
-                size=p.stat().st_size,
-                created_at=datetime.fromtimestamp(p.stat().st_mtime, UTC).isoformat(),
-            )
-            for p in files
+            ExportedFile(name=item.key.rsplit("/", 1)[-1], size=item.size, created_at=item.modified.isoformat())
+            for item in files
         ]

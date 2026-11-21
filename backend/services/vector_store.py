@@ -3,8 +3,9 @@ from chromadb.api.models.Collection import Collection
 
 
 class VectorStore:
-    def __init__(self, host: str, port: int, collection_name: str) -> None:
-        self.client = chromadb.HttpClient(host=host, port=port)
+    def __init__(self, host: str, port: int, collection_name: str, client=None) -> None:
+        # client: outro cliente do Chroma (os testes de contrato usam um em memória, sem servidor).
+        self.client = client or chromadb.HttpClient(host=host, port=port)
         self.collection_name = collection_name
         self.collection = self._get_or_create_collection()
 

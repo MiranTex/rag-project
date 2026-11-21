@@ -162,3 +162,28 @@ def test_only_admins_manage_settings(api):
     api["user"] = AuthenticatedUser.of(User(user_id="g", username="g", roles=["manager"], created_at="x"))
     assert api["client"].get("/settings").status_code == 403
     assert api["client"].put("/settings", json={"values": {"top_k": 7}}).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        # Formato dos addons do Base Stack: passa a usar o psycopg 3 e mantém o sslmode.
+        ("postgres://u:p%40x@db:5432/app?sslmode=require", "postgresql+psycopg://u:p%40x@db:5432/app?sslmode=require"),
+        ("postgresql://u:p@db/app", "postgresql+psycopg://u:p@db/app"),
+        ("postgresql+psycopg://u:p@db/app", "postgresql+psycopg://u:p@db/app"),
+        ("sqlite:///backend/storage/rag.db", "sqlite:///backend/storage/rag.db"),
+    ],
+)
+def test_database_url_is_normalised(url, expected):
+    assert config.Settings(_env_file=None, database_url=url).database_url == expected
+
+
+def test_vector_store_defaults_to_pgvector_only_on_postgres():
+    postgres = "postgres://u:p@db/app"
+    assert config.Settings(_env_file=None, database_url="sqlite:///x.db").vector_backend() == "chroma"
+    assert config.Settings(_env_file=None, database_url=postgres).vector_backend() == "pgvector"
+    assert config.Settings(_env_file=None, database_url=postgres, vector_store="chroma").vector_backend() == "chroma"
+    with pytest.raises(ValueError):
+        config.Settings(_env_file=None, database_url="sqlite:///x.db", vector_store="pgvector").vector_backend()
+    with pytest.raises(ValueError):
+        config.Settings(_env_file=None, vector_store="faiss").vector_backend()
