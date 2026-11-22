@@ -12,10 +12,10 @@ from backend.services.search_filters import SearchFilters
 TYPES = load_document_types("backend/document_types.json")
 
 
-def test_filters_build_chroma_where_and_match_metadata():
+def test_filters_build_where_and_match_metadata():
     filters = SearchFilters(document_type="academic", year_from=2020, sections=["conclusion"], fields={"course": "EI"})
 
-    assert filters.to_chroma_where() == {
+    assert filters.to_where() == {
         "$and": [
             {"document_type": "academic"},
             {"year": {"$gte": 2020}},
@@ -29,8 +29,8 @@ def test_filters_build_chroma_where_and_match_metadata():
     assert not filters.matches({**meta, "section": "introduction"})
     # Documentos sem ano não passam num filtro de ano.
     assert not filters.matches({k: v for k, v in meta.items() if k != "year"})
-    assert SearchFilters(document_id="d1").to_chroma_where() == {"document_id": "d1"}
-    assert SearchFilters().to_chroma_where() is None
+    assert SearchFilters(document_id="d1").to_where() == {"document_id": "d1"}
+    assert SearchFilters().to_where() is None
 
 
 def test_keyword_index_applies_predicate():

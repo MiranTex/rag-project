@@ -66,3 +66,27 @@ def test_fails_open_on_errors():
     ]:
         decision = ScopeGuard(llm).check("x", [], [], BLOCKED)
         assert decision.allowed and decision.category == "erro_guarda"
+
+
+def test_project_mode_allows_project_work_and_knows_the_project():
+    llm = _ClassifierLLM(_classified("trabalho_projeto", "estrutura da metodologia"))
+    decision = ScopeGuard(llm).check(
+        "ajuda-me a estruturar a metodologia", [], ["inquerito.pdf"], BLOCKED, project="Título: Estudo X\nObjetivo: medir Y"
+    )
+    assert (decision.allowed, decision.category) == (True, "trabalho_projeto")
+    call = llm.calls[0]
+    system = call["messages"][0]["content"]
+    assert "Objetivo: medir Y" in system and "inquerito.pdf" in system
+    assert "trabalho_projeto" in call["tools"][0]["function"]["parameters"]["properties"]["category"]["enum"]
+
+
+def test_project_mode_still_blocks_unrelated_requests():
+    guard = ScopeGuard(_ClassifierLLM(_classified("fora_do_ambito", "jogo")))
+    assert not guard.check("vamos jogar", [], [], BLOCKED, project="Título: Estudo X").allowed
+
+
+def test_project_category_does_not_exist_outside_projects():
+    llm = _ClassifierLLM(_classified("trabalho_projeto"))
+    decision = ScopeGuard(llm).check("escreve um poema", [], [], BLOCKED)
+    assert decision.category == "erro_guarda"  # categoria inválida fora de um projeto (fail-open, o prompt protege)
+    assert "trabalho_projeto" not in llm.calls[0]["tools"][0]["function"]["parameters"]["properties"]["category"]["enum"]

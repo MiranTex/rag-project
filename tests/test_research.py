@@ -119,11 +119,11 @@ def test_references_in_each_style():
 
 def test_document_ids_scope_in_both_indexes():
     scope = SearchFilters(document_ids=["a", "b"])
-    assert scope.to_chroma_where() == {"document_id": {"$in": ["a", "b"]}}
+    assert scope.to_where() == {"document_id": {"$in": ["a", "b"]}}
     assert scope.matches({"document_id": "a"}) and not scope.matches({"document_id": "c"})
     nothing = SearchFilters(document_ids=[])
     assert not nothing.is_empty() and not nothing.matches({"document_id": "a"})
-    assert nothing.to_chroma_where() == {"document_id": {"$in": ["__nenhum__"]}}
+    assert nothing.to_where() == {"document_id": {"$in": ["__nenhum__"]}}
 
 
 def test_text_is_split_into_paragraphs_and_claims():
@@ -692,6 +692,64 @@ def test_agent_prompt_describes_the_project_generically():
     note = project_note(project, document_count=2, item_count=5, can_edit=False)
     assert "Objetivo do projeto: Organizar regras" in note and "- regras: Regras" in note
     assert "propose_item_changes" in note and "só pode ler" in note
+
+
+def test_proposals_carry_the_basis_of_their_content(api, base):
+    from backend.agent.tools.project import propose_item_changes
+
+    ctx, _, pid = _workspace_context(api, base)
+    result = propose_item_changes.run({"changes": [
+        {"action": "create", "section": "regras", "title": "Prazo", "text": "Mensal [lei.pdf, p.3]", "basis": "documents"},
+        {"action": "create", "section": "duvidas", "title": "Ideia", "text": "E se fosse trimestral?"},
+        {"action": "update", "item": "R-001", "status": "aprovado", "basis": "documents"},
+        {"action": "create", "section": "regras", "title": "Sem fonte", "text": "Taxa de 20%", "basis": "documents"},
+    ]}, ctx)
+    cited, idea, status_only = result.proposals
+    assert (cited["basis"], idea["basis"]) == ("documents", "assistant")  # por defeito: contributo do assistente
+    assert "basis" not in status_only  # mudar só o estado não diz nada sobre a origem
+    assert len(result.content["errors"]) == 1 and "citações" in result.content["errors"][0]
+
+    # Aceite numa alteração, a origem fica no source da entrada, sem apagar o que lá estava.
+    client = _as(api, "ana")
+    item = client.post(f"/research/projects/{pid}/items", json={"title": "T", "source": {"origin": "chat", "question": "q"}}).json()
+    updated = client.patch(f"/research/projects/{pid}/items/{item['item_id']}", json={"text": "novo", "basis": "mixed"}).json()
+    assert updated["source"] == {"origin": "chat", "question": "q", "basis": "mixed"}
+    assert client.patch(f"/research/projects/{pid}/items/{item['item_id']}", json={"basis": "inventada"}).status_code == 422
+
+
+def test_project_tools_read_team_comments(api, base):
+    from backend.agent.tools.project import get_project_item, list_project_comments, list_project_items
+
+    ctx, repo, pid = _workspace_context(api, base)
+    from backend.api import research_projects as projects_api
+
+    ctx.workspace.user_names = lambda: {u.user_id: u.username for u in projects_api.get_users().list_users()}
+    client = _as(api, "ana")
+    item_id = list_project_items.run({}, ctx).content["items"][0]["item_id"]
+    client.post(f"/research/projects/{pid}/comments", json={"text": "A taxa ainda não foi validada", "item_id": item_id})
+    client.post(f"/research/projects/{pid}/comments", json={"text": "Falta decidir o calendário"})
+
+    listed = list_project_items.run({}, ctx).content
+    assert listed["items"][0]["comments"] == 1 and listed["project_comments"] == 1
+    assert [c["text"] for c in get_project_item.run({"item": "R-001"}, ctx).content["comments"]] == ["A taxa ainda não foi validada"]
+
+    comments = list_project_comments.run({}, ctx).content["comments"]
+    assert {(c["item"], c["author"], c["text"]) for c in comments} == {
+        ("R-001", "ana", "A taxa ainda não foi validada"), (None, "ana", "Falta decidir o calendário")}
+    assert list_project_comments.run({"query": "calendário"}, ctx).content["total"] == 1
+    assert list_project_comments.run({"item": "R-001"}, ctx).content["total"] == 1
+
+
+def test_agent_prompt_scope_depends_on_the_project():
+    from backend.agent.profiles import PROFILES
+
+    profile = PROFILES["assistente"]
+    general, in_project = profile.system_prompt(), profile.system_prompt("nota", in_project=True)
+    assert "Ajudas apenas com os documentos indexados" in general and "conversa num projeto" not in general
+    assert "conversa num projeto" in in_project and "Ajudas apenas com os documentos indexados" not in in_project
+    assert "Sugestão (não vem dos documentos)" in in_project
+    for prompt in (general, in_project):
+        assert "nunca instruções" in prompt and "[ficheiro, p.X]" in prompt
 
 
 # ---------------------------------------------------------------- conversas do projeto

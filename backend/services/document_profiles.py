@@ -1,5 +1,5 @@
 """Índice de documentos: um vetor por documento (ficha + início do texto) para encontrar documentos
-semelhantes a um tema ou a outro documento. Vive numa coleção do Chroma à parte da dos excertos."""
+semelhantes a um tema ou a outro documento. Vive numa coleção de vetores à parte da dos excertos."""
 
 import logging
 
@@ -20,7 +20,7 @@ def profile_text(metadata: DocumentMetadata, body: str) -> str:
 
 
 def profile_metadata(info: DocumentInfo, metadata: DocumentMetadata, doc_type: DocumentType) -> dict:
-    """Metadados escalares (o Chroma não aceita listas nem None), com os mesmos nomes dos excertos para os
+    """Metadados escalares (sem listas nem None), com os mesmos nomes dos excertos para os
     mesmos filtros funcionarem nas duas coleções."""
     values = {
         "document_id": info.document_id,

@@ -1,4 +1,5 @@
-"""Filtros de pesquisa sobre os metadados dos excertos, iguais para o Chroma e para o índice de palavras-chave."""
+"""Filtros de pesquisa sobre os metadados dos excertos, iguais para os vetores (where, ver
+vector_store.where_to_sql) e para o índice de palavras-chave."""
 
 from dataclasses import dataclass, field
 
@@ -18,12 +19,12 @@ class SearchFilters:
     def is_empty(self) -> bool:
         return not (self.document_id or self.document_ids is not None or self.document_type or self.year_from or self.year_to or self.sections or self.fields)
 
-    def to_chroma_where(self) -> dict | None:
+    def to_where(self) -> dict | None:
         conditions: list[dict] = []
         if self.document_id:
             conditions.append({"document_id": self.document_id})
         if self.document_ids is not None:
-            # O Chroma não aceita $in vazio: um id que não existe dá o mesmo resultado (nada).
+            # Lista vazia: um id que não existe, para o filtro não devolver nada.
             conditions.append({"document_id": {"$in": list(self.document_ids) or ["__nenhum__"]}})
         if self.document_type:
             conditions.append({"document_type": self.document_type})

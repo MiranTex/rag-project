@@ -25,6 +25,8 @@ class ProjectWorkspace:
     project: Project
     repository: ResearchRepository
     can_edit: bool = False
+    # Nome a mostrar de cada utilizador (autores dos comentários); só é chamado quando uma tool precisa.
+    user_names: Callable[[], dict[str, str]] = dict
 
 
 @dataclass

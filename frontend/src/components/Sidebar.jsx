@@ -229,7 +229,7 @@ export default function Sidebar({
         <footer className="flex items-center gap-4 border-t border-stone-200 dark:border-stone-800 px-4 py-3 text-xs text-stone-500 dark:text-stone-400">
           <HealthDot label="API" ok={health ? !health.offline : undefined} />
           <HealthDot label="Modelo" ok={health?.lmstudio} title={PROVIDER_LABELS[health?.llm_provider]} />
-          <HealthDot label="Chroma" ok={health?.chroma} />
+          <HealthDot label="Vetores" ok={health?.vectors} />
           <ThemeSwitch theme={theme} onThemeChange={onThemeChange} />
         </footer>
       </aside>

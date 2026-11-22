@@ -1,20 +1,23 @@
 services:
-  chroma:
-    image: chromadb/chroma:0.5.5
-    container_name: rag_chroma
+  postgres:
+    # PostgreSQL 17 com pgvector: base de dados da aplicação e vetores (tabela vector_embeddings).
+    image: pgvector/pgvector:0.8.7-pg17-trixie
+    container_name: rag_postgres
     restart: unless-stopped
-    ports:
-      - "8001:8000"
     environment:
-      - ANONYMIZED_TELEMETRY=FALSE
-      - IS_PERSISTENT=TRUE
+      - POSTGRES_USER=rag
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-rag}
+      - POSTGRES_DB=rag
+    # Só no host local (para correr o backend fora do Docker ou os testes de contrato com TEST_DATABASE_URL).
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-55433}:5432"
     volumes:
-      - chroma_data:/chroma/chroma
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8000"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   backend:
     build:
@@ -24,8 +27,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - CHROMA_HOST=chroma
-      - CHROMA_PORT=8000
+      - DATABASE_URL=postgresql+psycopg://rag:${POSTGRES_PASSWORD:-rag}@postgres:5432/rag
       - LM_STUDIO_BASE_URL=http://host.docker.internal:1234/v1
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -37,7 +39,7 @@ services:
       - backend_storage:/app/backend/storage
       - hf_cache:/app/.cache/huggingface
     depends_on:
-      chroma:
+      postgres:
         condition: service_healthy
 
   frontend:
@@ -50,6 +52,6 @@ services:
       - backend
 
 volumes:
-  chroma_data:
+  postgres_data:
   backend_storage:
   hf_cache:

@@ -31,6 +31,7 @@ import {
   useConfirm,
   controlBase,
 } from "../../components/ui";
+import { BASIS } from "../../research/basis";
 import { useResearch } from "../../research/ResearchContext";
 import Comments from "./Comments";
 
@@ -179,6 +180,8 @@ function Item({ item, projectId, structure, canEdit, currentUserId, isOwner, onE
   const kind = KINDS[item.kind] || KINDS.note;
   const KindIcon = kind.icon;
   const source = item.source || {};
+  // Etiqueta só no que não vem (só) dos documentos: é o que quem lê o caderno tem de verificar.
+  const basis = source.basis && source.basis !== "documents" ? BASIS[source.basis] : null;
   const when = new Date(item.updated_at || item.created_at).toLocaleDateString("pt-PT");
 
   async function remove() {
@@ -203,6 +206,11 @@ function Item({ item, projectId, structure, canEdit, currentUserId, isOwner, onE
               </span>
             )}
             {item.title && <h3 className="min-w-0 text-sm font-medium">{item.title}</h3>}
+            {basis && (
+              <Badge tone={basis.tone} title={basis.title}>
+                {basis.label}
+              </Badge>
+            )}
             <StatusControl
               item={item}
               statuses={structure.statuses}

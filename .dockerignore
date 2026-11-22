@@ -5,6 +5,5 @@
 **/*.pyc
 .pytest_cache
 data
-chroma_db
 backend/storage
 frontend

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, FilePen, FilePlus2, X } from "lucide-react";
 import { research } from "../api";
+import { BASIS } from "../research/basis";
 import { useResearch } from "../research/ResearchContext";
 import Markdown from "./Markdown";
 import { Badge, Button } from "./ui";
@@ -44,8 +45,9 @@ function Proposal({ proposal, projectId, canApply, question, onDecided }) {
     setBusy(true);
     setError("");
     try {
-      if (isNew) await research.addItem(projectId, { kind: "note", ...changes, source: { origin: "chat", question } });
-      else await research.updateItem(projectId, proposal.item_id, changes);
+      const basis = proposal.basis;
+      if (isNew) await research.addItem(projectId, { kind: "note", ...changes, source: { origin: "chat", question, ...(basis && { basis }) } });
+      else await research.updateItem(projectId, proposal.item_id, { ...changes, ...(basis && { basis }) });
       onDecided("accepted");
     } catch (err) {
       setError(err.message);
@@ -56,6 +58,7 @@ function Proposal({ proposal, projectId, canApply, question, onDecided }) {
   const Icon = isNew ? FilePlus2 : FilePen;
   const ref = isNew ? changes.ref : before.ref;
   const title = isNew ? changes.title : before.title;
+  const basis = BASIS[proposal.basis];
 
   return (
     <li
@@ -72,6 +75,11 @@ function Proposal({ proposal, projectId, canApply, question, onDecided }) {
             {title && <span className="text-sm font-medium">{title}</span>}
             {isNew && proposal.section_title && <Badge tone="outline">{proposal.section_title}</Badge>}
             {isNew && changes.status && <Badge>{changes.status}</Badge>}
+            {basis && (
+              <Badge tone={basis.tone} title={basis.title}>
+                {basis.label}
+              </Badge>
+            )}
           </div>
           {proposal.reason && <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">{proposal.reason}</p>}
           {isNew ? (

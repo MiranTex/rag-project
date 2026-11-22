@@ -10,7 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# apt-get upgrade: correções de segurança do Debian publicadas depois da imagem base (ex.: zlib1g).
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-por \
     && rm -rf /var/lib/apt/lists/*
 
@@ -18,7 +20,9 @@ RUN apt-get update \
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+# setuptools atualizado: a versão da imagem base inclui um jaraco.context vulnerável (CVE-2026-23949).
+RUN pip install --upgrade pip setuptools \
+    && pip install -r requirements.txt
 
 # Modelo de embeddings descarregado na construção da imagem (fica em HF_HOME): o arranque não depende da
 # rede nem demora a descarregar. Tem de ser o mesmo EMBEDDING_MODEL que a aplicação usa.

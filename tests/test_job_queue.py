@@ -95,7 +95,7 @@ def test_runner_completes_fails_and_reports(queue):
         handled.append(job.document_id)
 
     def broken(job):
-        raise RuntimeError("Chroma em baixo")
+        raise RuntimeError("Base de dados em baixo")
 
     runner = JobRunner(queue, {"extract": ok, "index": broken}, on_failure=lambda job, msg: failures.append((job.kind, msg)))
     good = queue.enqueue("extract", "d1")
@@ -105,9 +105,9 @@ def test_runner_completes_fails_and_reports(queue):
     assert runner.run_until_idle() == 3
     assert handled == ["d1"]
     assert queue.get(good.id).status == "done"
-    assert (queue.get(bad.id).status, queue.get(bad.id).error) == ("failed", "Chroma em baixo")
+    assert (queue.get(bad.id).status, queue.get(bad.id).error) == ("failed", "Base de dados em baixo")
     assert queue.get(unknown.id).status == "failed"
-    assert failures == [("index", "Chroma em baixo"), ("translate", "Tipo de trabalho desconhecido: translate")]
+    assert failures == [("index", "Base de dados em baixo"), ("translate", "Tipo de trabalho desconhecido: translate")]
 
 
 def test_runner_threads_process_the_queue(queue):
