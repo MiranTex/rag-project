@@ -1,4 +1,5 @@
 import csv
+import io
 from types import SimpleNamespace
 
 import pytest
@@ -126,9 +127,8 @@ def test_export_csv_never_overwrites(registry, ctx):
 
     assert first.exports[0].name == "Clausulas-do-contrato.csv"
     assert second.exports[0].name == "Clausulas-do-contrato-2.csv"
-    path = ctx.export_store.resolve(first.exports[0].name)
-    with path.open(encoding="utf-8-sig") as handle:
-        assert list(csv.reader(handle, delimiter=";")) == [["cláusula", "valor"], ["Retribuição", "1500"]]
+    content = ctx.export_store.read(first.exports[0].name).decode("utf-8-sig")
+    assert list(csv.reader(io.StringIO(content, newline=""), delimiter=";")) == [["cláusula", "valor"], ["Retribuição", "1500"]]
 
 
 def test_export_csv_rejects_ragged_rows(registry, ctx):
@@ -140,13 +140,14 @@ def test_export_document_docx(registry, ctx):
     content = "## Partes\n- **Empregadora:** ACME\n\n| Campo | Valor |\n|---|---|\n| Salário | 1500 |"
     result = run(registry, ctx, "export_document", filename="resumo", title="Resumo", content=content)
 
-    doc = Document(str(ctx.export_store.resolve(result.exports[0].name)))
+    doc = Document(io.BytesIO(ctx.export_store.read(result.exports[0].name)))
     texts = [p.text for p in doc.paragraphs]
     assert "Resumo" in texts and "Partes" in texts and "Empregadora: ACME" in texts
     assert doc.tables[0].cell(1, 1).text == "1500"
 
 
-def test_export_store_resolve_blocks_path_traversal(tmp_path):
+def test_export_store_read_blocks_path_traversal(tmp_path):
     store = ExportStore(str(tmp_path / "exports"))
     (tmp_path / "secret.txt").write_text("x")
-    assert store.resolve("../secret.txt") is None
+    assert store.read("../secret.txt") is None
+    assert store.for_owner("u-ana").read("../secret.txt") is None

@@ -237,8 +237,7 @@ def test_exports_are_visible_only_to_who_created_them(api):
     ana = api["login"]("ana")
     ana_id = client.get("/auth/me", headers=ana).json()["user"]["user_id"]
 
-    path = api["exports"].for_owner(ana_id).reserve_path("resumo", "md")
-    path.write_text("# Resumo")
+    api["exports"].for_owner(ana_id).create("resumo", "md", lambda path: path.write_text("# Resumo"))
 
     assert [e["name"] for e in client.get("/exports", headers=ana).json()] == ["resumo.md"]
     assert client.get("/exports/resumo.md", headers=ana).text == "# Resumo"

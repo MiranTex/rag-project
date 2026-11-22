@@ -1,6 +1,5 @@
 import logging
 from functools import lru_cache
-from pathlib import Path
 
 from sqlalchemy import Engine
 
@@ -38,6 +37,8 @@ from backend.services.keyword_index import KeywordIndex
 from backend.models import LLMProviderConfig
 from backend.services.llm_providers import ConfigurableLLM, env_fallback
 from backend.services.memory import SessionMemory
+from backend.services.object_storage import storage_for
+from backend.services.pgvector_store import PgVectorStore
 from backend.services.rag_pipeline import RagPipeline
 from backend.services.vector_store import VectorStore
 
@@ -103,14 +104,18 @@ def get_extraction_store() -> ExtractionRepository:
     return SqlExtractionRepository(get_database())
 
 
-@lru_cache(maxsize=1)
-def get_vector_store() -> VectorStore:
+def build_vector_store(collection_name: str) -> VectorStore | PgVectorStore:
+    """Chroma ou pgvector (VECTOR_STORE; por defeito pgvector quando a base de dados é PostgreSQL). No pgvector
+    as coleções são linhas da tabela vector_embeddings, com os mesmos nomes (CHROMA_COLLECTION)."""
     settings = get_settings()
-    return VectorStore(
-        host=settings.chroma_host,
-        port=settings.chroma_port,
-        collection_name=settings.chroma_collection,
-    )
+    if settings.vector_backend() == "pgvector":
+        return PgVectorStore(get_database(), collection_name)
+    return VectorStore(host=settings.chroma_host, port=settings.chroma_port, collection_name=collection_name)
+
+
+@lru_cache(maxsize=1)
+def get_vector_store() -> VectorStore | PgVectorStore:
+    return build_vector_store(get_settings().chroma_collection)
 
 
 # Secções que não descrevem o assunto do documento (para o vetor de um documento sem resumo).
@@ -125,15 +130,11 @@ def document_body(chunks: list[dict]) -> str:
 
 
 @lru_cache(maxsize=1)
-def get_profile_store() -> VectorStore:
+def get_profile_store() -> VectorStore | PgVectorStore:
     """Índice de documentos (um vetor por documento). Na primeira utilização cria os vetores que faltam
     para documentos indexados antes de este índice existir."""
     settings = get_settings()
-    store = VectorStore(
-        host=settings.chroma_host,
-        port=settings.chroma_port,
-        collection_name=f"{settings.chroma_collection}_profiles",
-    )
+    store = build_vector_store(f"{settings.chroma_collection}_profiles")
     try:
         existing = store.list_ids()
         for info in get_registry().list_documents():
@@ -186,7 +187,6 @@ def get_lmstudio_client() -> ConfigurableLLM:
 @lru_cache(maxsize=1)
 def get_rag_pipeline() -> RagPipeline:
     settings = get_settings()
-    memory_dir = Path(settings.upload_dir) / "memory"
     return RagPipeline(
         embedding_model=settings.embedding_model,
         vector_store=get_vector_store(),
@@ -195,13 +195,14 @@ def get_rag_pipeline() -> RagPipeline:
         rerank_weights=settings.parse_rerank_weights("default"),
         retrieval_mode_default=settings.retrieval_mode_default,
         keyword_candidate_multiplier=settings.keyword_candidate_multiplier,
-        memory_service=SessionMemory(storage_dir=memory_dir),
+        # Memória das conversas em uploads/memory/ (no disco local ou no storage S3).
+        memory_service=SessionMemory(storage=storage_for(settings, "uploads"), prefix="memory"),
     )
 
 
 @lru_cache(maxsize=1)
 def get_export_store() -> ExportStore:
-    return ExportStore(get_settings().export_dir)
+    return ExportStore(storage_for(get_settings(), "exports"))
 
 
 @lru_cache(maxsize=1)

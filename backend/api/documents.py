@@ -57,6 +57,7 @@ from backend.services.embeddings import embed_texts
 from backend.services.extraction_review import validate_page
 from backend.services.job_runner import JobRunner
 from backend.services.metadata_extraction import clean_fields, propose_metadata
+from backend.services.object_storage import ObjectStorage, storage_for
 from backend.services.ocr import ocr_image, render_page
 from backend.services.pdf_ingestion import (
     chunk_pages,
@@ -64,7 +65,6 @@ from backend.services.pdf_ingestion import (
     normalize_text,
     extract_pages,
     file_sha256,
-    save_uploaded_file,
     utc_now_iso,
 )
 
@@ -140,8 +140,13 @@ def _taken_names(document_id: str) -> set[str]:
     return {d.filename for d in get_registry().list_documents() if d.document_id != document_id}
 
 
-def _stored_path(info: DocumentInfo) -> Path:
-    return Path(get_settings().upload_dir) / (info.storage_name or info.filename)
+def _uploads() -> ObjectStorage:
+    """PDFs carregados: pasta UPLOAD_DIR ou, com STORAGE_ENDPOINT, o prefixo uploads/ do bucket."""
+    return storage_for(get_settings(), "uploads")
+
+
+def _stored_key(info: DocumentInfo) -> str:
+    return info.storage_name or info.filename
 
 
 def _drop_legacy_file(previous: DocumentInfo, stored_name: str) -> None:
@@ -154,7 +159,7 @@ def _drop_legacy_file(previous: DocumentInfo, stored_name: str) -> None:
         (d.storage_name or d.filename) == legacy for d in get_registry().list_documents() if d.document_id != previous.document_id
     )
     if not in_use:
-        (Path(get_settings().upload_dir) / legacy).unlink(missing_ok=True)
+        _uploads().delete(legacy)
 
 
 def _fingerprint(pages: list[ReviewPage]) -> str:
@@ -196,22 +201,24 @@ def _extract_for_review(info: DocumentInfo, is_new: bool) -> tuple[DocumentInfo,
     get_keyword_index().remove_document(document_id)
     get_profile_store().delete_document(document_id)
 
-    saved_path = _stored_path(info)
-    extracted = {
-        page.page: page
-        for page in extract_pages(
-            saved_path,
-            ocr_languages=settings.ocr_languages if settings.ocr_enabled else None,
-            ocr_dpi=settings.ocr_dpi,
-            ocr_min_text_chars=settings.ocr_min_text_chars,
-            ocr_min_confidence=settings.ocr_min_confidence,
-            ocr_max_workers=settings.ocr_max_workers,
-        )
-    }
+    # O pypdf, o pdfium e o tesseract precisam de um caminho: com S3, é uma cópia temporária do PDF.
+    with _uploads().local_copy(_stored_key(info)) as saved_path:
+        extracted = {
+            page.page: page
+            for page in extract_pages(
+                saved_path,
+                ocr_languages=settings.ocr_languages if settings.ocr_enabled else None,
+                ocr_dpi=settings.ocr_dpi,
+                ocr_min_text_chars=settings.ocr_min_text_chars,
+                ocr_min_confidence=settings.ocr_min_confidence,
+                ocr_max_workers=settings.ocr_max_workers,
+            )
+        }
+        page_count = count_pages(saved_path)
 
     # Páginas sem texto também entram na revisão, para se poder escrever o texto à mão.
     pages: list[ReviewPage] = []
-    for number in range(1, count_pages(saved_path) + 1):
+    for number in range(1, page_count + 1):
         page = extracted.get(number)
         text = page.text if page else ""
         source = page.source if page else "none"
@@ -466,22 +473,20 @@ def delete_document(document_id: str) -> dict:
     registry.remove(document_id)
     get_extraction_store().delete(document_id)
 
-    upload_path = _stored_path(existing)
-    if upload_path.exists():
-        upload_path.unlink()
+    _uploads().delete(_stored_key(existing))
 
     return {"message": "Documento removido com sucesso."}
 
 
 def _reextract(existing: DocumentInfo, user: AuthenticatedUser) -> UploadResponse:
-    upload_path = _stored_path(existing)
-    if not upload_path.exists():
-        raise HTTPException(status_code=404, detail="Ficheiro original não encontrado no storage local.")
+    uploads = _uploads()
+    if not uploads.exists(_stored_key(existing)):
+        raise HTTPException(status_code=404, detail="Ficheiro original não encontrado no storage.")
     with _locked(existing.document_id):
         # Documentos antigos estão em disco com o nome original: passam para <id>.pdf.
         stored_name = f"{existing.document_id}.pdf"
         if (existing.storage_name or existing.filename) != stored_name:
-            save_uploaded_file(get_settings().upload_dir, stored_name, upload_path.read_bytes())
+            uploads.put(stored_name, uploads.get(_stored_key(existing)))
             _drop_legacy_file(existing, stored_name)
             existing = existing.model_copy(
                 update={"storage_name": stored_name, "original_filename": existing.original_filename or existing.filename}
@@ -524,7 +529,6 @@ async def upload_document(
     if not raw:
         raise HTTPException(status_code=400, detail="Ficheiro vazio.")
 
-    settings = get_settings()
     sha = file_sha256(raw)
     existing = get_registry().find_by_hash(sha)
     if existing and reindex:
@@ -535,7 +539,7 @@ async def upload_document(
     document_id = str(uuid4())
     stored_name = f"{document_id}.pdf"
     # Em disco pelo id: o nome no sistema pode mudar e dois ficheiros com o mesmo nome não se sobrepõem.
-    save_uploaded_file(settings.upload_dir, stored_name, raw)
+    await run_in_threadpool(_uploads().put, stored_name, raw)
     original = Path(file.filename).name
     info = DocumentInfo(
         document_id=document_id,
@@ -588,11 +592,13 @@ async def rerun_page_ocr(document_id: str, page_number: int, payload: PageOcrReq
             _require_pending(info)
             page = _find_page(pages, page_number)
 
-            upload_path = _stored_path(info)
-            if not upload_path.exists():
-                raise HTTPException(status_code=404, detail="Ficheiro original não encontrado no storage local.")
+            try:
+                with _uploads().local_copy(_stored_key(info)) as upload_path:
+                    image = render_page(upload_path, page_number, dpi)
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail="Ficheiro original não encontrado no storage.") from None
 
-            result = ocr_image(render_page(upload_path, page_number, dpi), settings.ocr_languages)
+            result = ocr_image(image, settings.ocr_languages)
             text = normalize_text(result.text)
             source = "ocr" if text else "none"
             confidence = result.confidence if text else None

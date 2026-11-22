@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from backend.services.object_storage import LocalStorage, ObjectStorage
+
 
 def _normalize_turns(turns: list[dict[str, str]] | None) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
@@ -81,21 +83,26 @@ class SessionMemory:
             summary_text = summary_text[:220].rstrip() + "..."
         return summary_text
 
-    def __init__(self, storage_dir: str | Path | None = None) -> None:
-        self.storage_dir = Path(storage_dir or "backend/storage/memory")
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, storage_dir: str | Path | None = None, storage: ObjectStorage | None = None, prefix: str = "") -> None:
+        # Um ficheiro JSON por sessão: numa pasta local (storage_dir) ou num ObjectStorage (disco ou S3) debaixo de prefix.
+        self.storage = storage or LocalStorage(storage_dir or "backend/storage/memory")
+        self.prefix = prefix.strip("/")
 
-    def _session_path(self, session_id: str) -> Path:
-        return self.storage_dir / f"{session_id}.json"
+    def _session_key(self, session_id: str) -> str:
+        return f"{self.prefix}/{session_id}.json" if self.prefix else f"{session_id}.json"
+
+    def _load(self, session_id: str) -> dict[str, Any] | None:
+        raw = self.storage.get(self._session_key(session_id))
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
 
     def get_context(self, session_id: str) -> str:
-        path = self._session_path(session_id)
-        if not path.exists():
-            return ""
-
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        payload = self._load(session_id)
+        if not payload:
             return ""
 
         summary = payload.get("summary", "")
@@ -118,13 +125,7 @@ class SessionMemory:
         return "\n".join(parts)
 
     def remember(self, session_id: str, question: str, answer: str | None = None, topics: list[str] | None = None) -> None:
-        path = self._session_path(session_id)
-        payload: dict[str, Any] = {"summary": "", "topics": [], "turns": []}
-        if path.exists():
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                payload = {"summary": "", "topics": [], "turns": []}
+        payload: dict[str, Any] = self._load(session_id) or {"summary": "", "topics": [], "turns": []}
 
         existing_topics = [str(item) for item in payload.get("topics", [])]
         new_topics = [str(topic) for topic in (topics or [])]
@@ -142,4 +143,4 @@ class SessionMemory:
         payload["summary"] = summary
         payload["topics"] = list(dict.fromkeys(combined_topics + inferred_topics))[:8]
         payload["turns"] = turns
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.storage.put(self._session_key(session_id), json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
