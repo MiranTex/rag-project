@@ -717,6 +717,29 @@ def test_proposals_carry_the_basis_of_their_content(api, base):
     assert client.patch(f"/research/projects/{pid}/items/{item['item_id']}", json={"basis": "inventada"}).status_code == 422
 
 
+def test_project_tools_read_team_comments(api, base):
+    from backend.agent.tools.project import get_project_item, list_project_comments, list_project_items
+
+    ctx, repo, pid = _workspace_context(api, base)
+    from backend.api import research_projects as projects_api
+
+    ctx.workspace.user_names = lambda: {u.user_id: u.username for u in projects_api.get_users().list_users()}
+    client = _as(api, "ana")
+    item_id = list_project_items.run({}, ctx).content["items"][0]["item_id"]
+    client.post(f"/research/projects/{pid}/comments", json={"text": "A taxa ainda não foi validada", "item_id": item_id})
+    client.post(f"/research/projects/{pid}/comments", json={"text": "Falta decidir o calendário"})
+
+    listed = list_project_items.run({}, ctx).content
+    assert listed["items"][0]["comments"] == 1 and listed["project_comments"] == 1
+    assert [c["text"] for c in get_project_item.run({"item": "R-001"}, ctx).content["comments"]] == ["A taxa ainda não foi validada"]
+
+    comments = list_project_comments.run({}, ctx).content["comments"]
+    assert {(c["item"], c["author"], c["text"]) for c in comments} == {
+        ("R-001", "ana", "A taxa ainda não foi validada"), (None, "ana", "Falta decidir o calendário")}
+    assert list_project_comments.run({"query": "calendário"}, ctx).content["total"] == 1
+    assert list_project_comments.run({"item": "R-001"}, ctx).content["total"] == 1
+
+
 def test_agent_prompt_scope_depends_on_the_project():
     from backend.agent.profiles import PROFILES
 

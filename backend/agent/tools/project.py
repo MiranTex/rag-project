@@ -1,4 +1,4 @@
-"""Tools do caderno de um projeto: ler as entradas e propor alterações.
+"""Tools do caderno de um projeto: ler as entradas e os comentários da equipa, e propor alterações.
 
 Só entram no agente quando a conversa decorre num projeto (ver api/agent.py). Não conhecem nenhum assunto: as
 secções, as referências e os estados são os que o projeto define. As propostas não são gravadas aqui; vão para a
@@ -11,10 +11,11 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from backend.agent.tools.base import ProjectWorkspace, ToolContext, ToolError, ToolResult, tool
-from backend.research.models import NotebookItem
+from backend.research.models import Comment, NotebookItem
 
 PREVIEW_CHARS = 400
 MAX_LISTED = 80
+MAX_COMMENTS = 60
 
 # Origem do conteúdo de uma proposta; fica no source da entrada (source.basis) e aparece no caderno.
 Basis = Literal["documents", "assistant", "mixed"]
@@ -45,6 +46,14 @@ def _find_item(workspace: ProjectWorkspace, reference: str) -> NotebookItem:
     if len(matches) > 1:
         raise ToolError(f"Há {len(matches)} entradas com a referência {reference}; usa o item_id.")
     raise ToolError(f"Entrada não encontrada: {reference}. Usa list_project_items para ver as que existem.")
+
+
+def _comment_view(comment: Comment, names: dict[str, str], refs: dict[str, str] | None = None) -> dict:
+    view = {"author": names.get(comment.author_id, "?"), "date": comment.created_at[:10], "text": comment.text}
+    if refs is not None:
+        # Entrada comentada (referência ou título); None: comentário ao projeto em geral.
+        view["item"] = refs.get(comment.item_id, comment.item_id) if comment.item_id else None
+    return view
 
 
 def _view(item: NotebookItem, sections: dict[str, str], full: bool = False) -> dict:
@@ -92,11 +101,15 @@ def list_project_items(params: ListItemsParams, context: ToolContext) -> ToolRes
     order = {key: n for n, key in enumerate(sections)}
     items.sort(key=lambda i: (order.get(i.section, len(order)), i.ref or "~", i.created_at))
     shown = items[:MAX_LISTED]
+    counts: dict[str | None, int] = {}
+    for comment in workspace.repository.list_comments(workspace.project.project_id):
+        counts[comment.item_id] = counts.get(comment.item_id, 0) + 1
     return ToolResult(
         content={
             "total": len(items),
             "shown": len(shown),
-            "items": [_view(item, sections) for item in shown],
+            "items": [_view(item, sections) | {"comments": counts.get(item.item_id, 0)} for item in shown],
+            "project_comments": counts.get(None, 0),
         },
         summary=f"{len(items)} entrada(s) no caderno",
     )
@@ -106,11 +119,51 @@ class GetItemParams(BaseModel):
     item: str = Field(description="item_id ou referência da entrada (ex.: RF-001).")
 
 
-@tool(name="get_project_item", description="Lê uma entrada do caderno do projeto por inteiro.", params=GetItemParams)
+@tool(
+    name="get_project_item",
+    description="Lê uma entrada do caderno do projeto por inteiro, com os comentários da equipa sobre ela.",
+    params=GetItemParams,
+)
 def get_project_item(params: GetItemParams, context: ToolContext) -> ToolResult:
     workspace = _workspace(context)
     item = _find_item(workspace, params.item)
-    return ToolResult(content=_view(item, _section_titles(workspace), full=True), summary=f"Entrada {item.ref or item.title[:40]}")
+    comments = [c for c in workspace.repository.list_comments(workspace.project.project_id) if c.item_id == item.item_id]
+    names = workspace.user_names() if comments else {}
+    view = _view(item, _section_titles(workspace), full=True) | {"comments": [_comment_view(c, names) for c in comments]}
+    return ToolResult(content=view, summary=f"Entrada {item.ref or item.title[:40]}")
+
+
+class ListCommentsParams(BaseModel):
+    item: str | None = Field(default=None, description="Só os comentários desta entrada (item_id ou referência); vazio: todos.")
+    query: str | None = Field(default=None, description="Texto a procurar nos comentários (opcional).")
+
+
+@tool(
+    name="list_project_comments",
+    description=(
+        "Lista os comentários da equipa no projeto (ao projeto em geral e às entradas do caderno), dos mais recentes "
+        "para os mais antigos, com autor, data e a entrada comentada. Usa para saber o que a equipa discutiu, "
+        "pediu ou deixou em aberto."
+    ),
+    params=ListCommentsParams,
+)
+def list_project_comments(params: ListCommentsParams, context: ToolContext) -> ToolResult:
+    workspace = _workspace(context)
+    comments = workspace.repository.list_comments(workspace.project.project_id)
+    if params.item:
+        item_id = _find_item(workspace, params.item).item_id
+        comments = [c for c in comments if c.item_id == item_id]
+    if params.query and params.query.strip():
+        wanted = params.query.strip().lower()
+        comments = [c for c in comments if wanted in c.text.lower()]
+    comments.sort(key=lambda c: c.created_at, reverse=True)
+    shown = comments[:MAX_COMMENTS]
+    refs = {i.item_id: i.ref or i.title[:60] for i in workspace.repository.list_items(workspace.project.project_id)} if shown else {}
+    names = workspace.user_names() if shown else {}
+    return ToolResult(
+        content={"total": len(comments), "shown": len(shown), "comments": [_comment_view(c, names, refs) for c in shown]},
+        summary=f"{len(comments)} comentário(s)",
+    )
 
 
 class ItemChange(BaseModel):
@@ -222,4 +275,4 @@ def propose_item_changes(params: ProposeParams, context: ToolContext) -> ToolRes
     )
 
 
-PROJECT_TOOLS = [list_project_items, get_project_item, propose_item_changes]
+PROJECT_TOOLS = [list_project_items, get_project_item, list_project_comments, propose_item_changes]
