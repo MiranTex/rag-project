@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { FileDown } from "lucide-react";
+import { FileDown, FolderOpen } from "lucide-react";
 import { downloadExport, listExports } from "../api";
 import PageShell from "../components/PageShell";
-import { Button, Empty, ErrorText, Spinner } from "../components/ui";
+import { EmptyState, ErrorText, IconButton, ListCard, Spinner } from "../components/ui";
 
 const formatSize = (bytes) => (bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
@@ -16,22 +16,28 @@ export default function FilesPage({ onOpenSidebar }) {
   }, []);
 
   return (
-    <PageShell title="Ficheiros" description="O que geraste: exports do agente, esqueletos, rascunhos, matrizes e bibliografias. Só tu os vês." onOpenSidebar={onOpenSidebar}>
+    <PageShell title="Ficheiros" subtitle="O que geraste: exports do agente, esqueletos, rascunhos, matrizes e bibliografias. Só tu os vês." onOpenSidebar={onOpenSidebar}>
       <ErrorText>{error}</ErrorText>
       {!files && !error && <Spinner label="A carregar…" />}
-      {files && files.length === 0 && <Empty>Ainda não geraste ficheiros.</Empty>}
+      {files && files.length === 0 && (
+        <EmptyState icon={FolderOpen} title="Ainda não geraste ficheiros">
+          Os exports do agente e o que gerares num projeto (esqueletos, matrizes, bibliografias) aparecem aqui.
+        </EmptyState>
+      )}
       {files && files.length > 0 && (
-        <ul className="divide-y divide-stone-200 rounded-xl border border-stone-200 dark:divide-stone-800 dark:border-stone-800">
+        <ListCard>
           {files.map((file) => (
-            <li key={file.name} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-              <span className="min-w-0 flex-1 truncate">{file.name}</span>
-              <span className="text-xs text-stone-500">
-                {formatSize(file.size)} · {new Date(file.created_at).toLocaleString("pt-PT")}
+            <li key={file.name} className="flex items-center gap-3 py-2 pl-4 pr-2 text-sm">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-stone-800 dark:text-stone-200">{file.name}</span>
+                <span className="block text-xs text-stone-500 dark:text-stone-400">
+                  {formatSize(file.size)} · {new Date(file.created_at).toLocaleString("pt-PT")}
+                </span>
               </span>
-              <Button variant="ghost" icon={FileDown} aria-label={`Descarregar ${file.name}`} onClick={() => downloadExport(file.name).catch((err) => setError(err.message))} />
+              <IconButton icon={FileDown} label={`Descarregar ${file.name}`} onClick={() => downloadExport(file.name).catch((err) => setError(err.message))} />
             </li>
           ))}
-        </ul>
+        </ListCard>
       )}
     </PageShell>
   );

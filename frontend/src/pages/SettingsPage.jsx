@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Loader2, RotateCcw, Save } from "lucide-react";
+import { RotateCcw, Save } from "lucide-react";
 import { getSettings, resetSetting, saveSettings } from "../api";
 import LlmProviderSettings from "../components/LlmProviderSettings";
 import PageShell from "../components/PageShell";
+import { Button, ErrorText, Spinner, inputClass, useConfirm, controlBase } from "../components/ui";
 
 const WEIGHT_FACTORS = [
   { key: "vector", label: "Significado" },
@@ -11,9 +12,6 @@ const WEIGHT_FACTORS = [
   { key: "position", label: "Posição" },
   { key: "density", label: "Densidade" },
 ];
-
-const inputClass =
-  "w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-1.5 text-sm outline-none focus:border-stone-500";
 
 // Os pesos chegam como texto JSON; no formulário editam-se como um número por fator.
 function toDraft(setting) {
@@ -46,7 +44,7 @@ function describeDefault(setting) {
   return String(setting.default);
 }
 
-function Field({ setting, value, onChange, disabled }) {
+function SettingInput({ setting, value, onChange, disabled }) {
   const id = `setting-${setting.key}`;
   switch (setting.kind) {
     case "bool":
@@ -79,7 +77,7 @@ function Field({ setting, value, onChange, disabled }) {
       return (
         <input
           id={id}
-          className={`${inputClass} max-w-32`}
+          className={`${controlBase} max-w-32`}
           type="number"
           step={setting.kind === "int" ? 1 : 0.01}
           min={setting.minimum ?? undefined}
@@ -116,6 +114,7 @@ function Field({ setting, value, onChange, disabled }) {
 }
 
 export default function SettingsPage({ onOpenSidebar, onSaved }) {
+  const confirm = useConfirm();
   const [settings, setSettings] = useState(null);
   const [drafts, setDrafts] = useState({});
   const [error, setError] = useState("");
@@ -156,30 +155,34 @@ export default function SettingsPage({ onOpenSidebar, onSaved }) {
       onOpenSidebar={onOpenSidebar}
       actions={
         settings && (
-          <button
-            type="button"
-            disabled={saving || changed.length === 0}
+          <Button
+            variant="primary"
+            icon={Save}
+            busy={saving}
+            disabled={changed.length === 0}
             onClick={() =>
               run(
                 () => saveSettings(Object.fromEntries(changed.map((s) => [s.key, drafts[s.key]]))),
                 "Configurações guardadas.",
               )
             }
-            className="flex items-center gap-2 rounded-lg bg-accent-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:bg-stone-300 dark:disabled:bg-stone-700"
           >
-            {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
             Guardar{changed.length > 0 && ` (${changed.length})`}
-          </button>
+          </Button>
         )
       }
     >
       <LlmProviderSettings onSaved={onSaved} />
-      {error && <p className="mb-4 text-sm text-red-700 dark:text-red-300">{error}</p>}
-      {!settings && !error && <Loader2 className="size-5 animate-spin text-stone-400" />}
+      {error && (
+        <div className="mb-4">
+          <ErrorText>{error}</ErrorText>
+        </div>
+      )}
+      {!settings && !error && <Spinner label="A carregar…" />}
       {groups.map((group) => (
         <section key={group} className="mb-8">
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-500 dark:text-stone-400">{group}</h2>
-          <div className="divide-y divide-stone-200 rounded-xl border border-stone-200 dark:divide-stone-800 dark:border-stone-800">
+          <div className="divide-y divide-stone-200 rounded-xl border border-stone-200 bg-white dark:divide-stone-800 dark:border-stone-800 dark:bg-stone-900">
             {settings
               .filter((s) => s.group === group)
               .map((setting) => (
@@ -187,7 +190,7 @@ export default function SettingsPage({ onOpenSidebar, onSaved }) {
                   <div className={setting.kind === "bool" ? "flex items-start gap-3" : "space-y-2"}>
                     {setting.kind === "bool" && (
                       <div className="pt-0.5">
-                        <Field
+                        <SettingInput
                           setting={setting}
                           value={drafts[setting.key]}
                           disabled={saving}
@@ -203,7 +206,7 @@ export default function SettingsPage({ onOpenSidebar, onSaved }) {
                     </div>
                   </div>
                   {setting.kind !== "bool" && (
-                    <Field
+                    <SettingInput
                       setting={setting}
                       value={drafts[setting.key]}
                       disabled={saving}
@@ -213,15 +216,23 @@ export default function SettingsPage({ onOpenSidebar, onSaved }) {
                   {setting.overridden && (
                     <p className="flex flex-wrap items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
                       Alterado na aplicação. Valor do .env: {describeDefault(setting)}
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={RotateCcw}
                         disabled={saving}
-                        onClick={() => run(() => resetSetting(setting.key), `${setting.label}: valor do .env reposto.`)}
-                        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-accent-600 hover:bg-accent-50 dark:text-accent-400 dark:hover:bg-accent-500/15"
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: `Repor “${setting.label}”?`,
+                            message: `Volta a valer o valor do ficheiro .env (${describeDefault(setting)}). O valor alterado na aplicação perde-se.`,
+                            confirmLabel: "Repor",
+                            tone: "neutral",
+                          });
+                          if (ok) run(() => resetSetting(setting.key), `${setting.label}: valor do .env reposto.`);
+                        }}
                       >
-                        <RotateCcw className="size-3" />
                         Repor
-                      </button>
+                      </Button>
                     </p>
                   )}
                 </div>

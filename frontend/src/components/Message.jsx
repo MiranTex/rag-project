@@ -4,6 +4,7 @@ import { sendFeedback } from "../api";
 import { useResearch } from "../research/ResearchContext";
 import AgentSteps from "./AgentSteps";
 import ExportLinks from "./ExportLinks";
+import ProposalList from "./ProposalList";
 import Markdown from "./Markdown";
 
 function uniqueSources(sources = []) {
@@ -13,6 +14,41 @@ function uniqueSources(sources = []) {
     if (!seen.has(key)) seen.set(key, source);
   }
   return [...seen.values()];
+}
+
+// Fontes de uma resposta: as primeiras ficam à vista; as restantes atrás de "+N fontes".
+const VISIBLE_SOURCES = 3;
+
+function SourceList({ sources, onOpen }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!sources.length) return null;
+  const hidden = sources.length - VISIBLE_SOURCES;
+  const shown = expanded || hidden <= 0 ? sources : sources.slice(0, VISIBLE_SOURCES);
+  const toggleClass =
+    "rounded-full px-2 py-0.5 text-xs font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200";
+
+  return (
+    <>
+      {shown.map((source) => (
+        <button
+          type="button"
+          key={`${source.filename}#${source.page}`}
+          title={`${source.filename}, p. ${source.page}${source.text ? `\n\n${source.text.slice(0, 300)}` : ""}`}
+          onClick={() => source.document_id && onOpen(source)}
+          className="inline-flex min-w-0 max-w-56 items-center gap-1 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-2.5 py-0.5 text-xs text-stone-600 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-600"
+        >
+          <FileText className="size-3 shrink-0 text-stone-400 dark:text-stone-500" />
+          <span className="truncate">{source.filename.replace(/\.pdf$/i, "")}</span>
+          <span className="shrink-0 text-stone-400 dark:text-stone-500">p. {source.page}</span>
+        </button>
+      ))}
+      {hidden > 0 && (
+        <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className={toggleClass}>
+          {expanded ? "Mostrar menos" : `+${hidden} ${hidden === 1 ? "fonte" : "fontes"}`}
+        </button>
+      )}
+    </>
+  );
 }
 
 function TypingDots() {
@@ -191,7 +227,7 @@ function RetrievalDetails({ msg }) {
   );
 }
 
-export default function Message({ msg, pending }) {
+export default function Message({ msg, pending, onChange }) {
   const { openReader, saveItem } = useResearch();
   const isAgent = msg.mode === "agent";
   const isError = msg.answer?.startsWith("Erro:");
@@ -223,6 +259,7 @@ export default function Message({ msg, pending }) {
         ) : null}
 
         {isAgent && <ExportLinks exports={msg.exports} />}
+        {isAgent && <ProposalList msg={msg} onChange={pending ? null : onChange} />}
 
         {msg.stopped && !(isAgent && msg.steps?.length && !msg.answer) && (
           <p className="mt-2 text-sm text-stone-400 dark:text-stone-500">Resposta interrompida.</p>
@@ -253,19 +290,7 @@ export default function Message({ msg, pending }) {
               </button>
             )}
             {!msg.blocked && <Feedback msg={msg} sources={sources} />}
-            {sources.map((source) => (
-              <button
-                type="button"
-                key={`${source.filename}#${source.page}`}
-                title={source.text ? source.text.slice(0, 300) : "Abrir no leitor"}
-                onClick={() => source.document_id && openReader(source)}
-                className="inline-flex max-w-full items-center gap-1 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-2.5 py-0.5 text-xs text-stone-600 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-600"
-              >
-                <FileText className="size-3 shrink-0 text-stone-400 dark:text-stone-500" />
-                <span className="truncate">{source.filename}</span>
-                <span className="shrink-0 text-stone-400 dark:text-stone-500">p. {source.page}</span>
-              </button>
-            ))}
+            <SourceList sources={sources} onOpen={openReader} />
           </div>
         )}
 

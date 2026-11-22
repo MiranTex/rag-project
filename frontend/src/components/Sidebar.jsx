@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useResearch } from "../research/ResearchContext";
 import {
   Compass,
   FileText,
@@ -91,6 +92,42 @@ function NavItem({ to, icon: Icon, label, badge, onNavigate }) {
   );
 }
 
+function NavGroup({ label, children }) {
+  return (
+    <div className="pt-4 first:pt-0">
+      {label && <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">{label}</p>}
+      <div className="space-y-0.5">{children}</div>
+    </div>
+  );
+}
+
+// Os projetos mexidos mais recentemente, para lá chegar sem passar pela lista.
+function RecentProjects({ onNavigate }) {
+  const { projects, activeProjectId } = useResearch();
+  const recent = projects.slice(0, 5);
+  if (!recent.length) return null;
+  return (
+    <div className="ml-4 mt-0.5 space-y-0.5 border-l border-stone-200 pl-2 dark:border-stone-800">
+      {recent.map(({ project }) => (
+        <NavLink
+          key={project.project_id}
+          to={`/projetos/${project.project_id}`}
+          onClick={onNavigate}
+          title={project.title}
+          className={({ isActive }) =>
+            `flex items-center gap-2 truncate rounded-md px-2 py-1 text-[13px] ${
+              isActive ? "bg-stone-200/70 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100" : "text-stone-600 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800"
+            }`
+          }
+        >
+          <span className={`size-1.5 shrink-0 rounded-full ${project.project_id === activeProjectId ? "bg-accent-500" : "bg-stone-300 dark:bg-stone-600"}`} />
+          <span className="truncate">{project.title}</span>
+        </NavLink>
+      ))}
+    </div>
+  );
+}
+
 // Cada pessoa só vê as páginas que as suas permissões deixam usar.
 export default function Sidebar({
   open,
@@ -136,22 +173,29 @@ export default function Sidebar({
           </div>
         </div>
 
-        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
-          <NavItem to="/" icon={MessageSquare} label="Chat" onNavigate={onClose} />
-          {pages.research && (
-            <>
-              <NavItem to="/pesquisa" icon={Search} label="Pesquisa" onNavigate={onClose} />
-              <NavItem to="/descobrir" icon={Compass} label="Descobrir" onNavigate={onClose} />
-              <NavItem to="/projetos" icon={FolderOpen} label="Projetos" onNavigate={onClose} />
-            </>
+        <nav className="flex-1 overflow-y-auto px-2 pb-3" aria-label="Navegação principal">
+          <NavGroup>
+            <NavItem to="/" icon={MessageSquare} label="Chat" onNavigate={onClose} />
+            {pages.research && (
+              <>
+                <NavItem to="/projetos" icon={FolderOpen} label="Projetos" onNavigate={onClose} />
+                <RecentProjects onNavigate={onClose} />
+                <NavItem to="/pesquisa" icon={Search} label="Pesquisa" onNavigate={onClose} />
+                <NavItem to="/descobrir" icon={Compass} label="Descobrir" onNavigate={onClose} />
+              </>
+            )}
+          </NavGroup>
+          <NavGroup label="Biblioteca">
+            {pages.documents && <NavItem to="/documentos" icon={FileText} label="Documentos" badge={attentionCount} onNavigate={onClose} />}
+            <NavItem to="/ficheiros" icon={Files} label="Ficheiros gerados" onNavigate={onClose} />
+          </NavGroup>
+          {(pages.users || pages.feedback || pages.settings) && (
+            <NavGroup label="Administração">
+              {pages.users && <NavItem to="/utilizadores" icon={Users} label="Utilizadores" onNavigate={onClose} />}
+              {pages.feedback && <NavItem to="/avaliacoes" icon={ThumbsUp} label="Avaliações" onNavigate={onClose} />}
+              {pages.settings && <NavItem to="/configuracoes" icon={Settings} label="Configurações" onNavigate={onClose} />}
+            </NavGroup>
           )}
-          <NavItem to="/ficheiros" icon={Files} label="Ficheiros" onNavigate={onClose} />
-          {pages.documents && (
-            <NavItem to="/documentos" icon={FileText} label="Documentos" badge={attentionCount} onNavigate={onClose} />
-          )}
-          {pages.users && <NavItem to="/utilizadores" icon={Users} label="Utilizadores" onNavigate={onClose} />}
-          {pages.feedback && <NavItem to="/avaliacoes" icon={ThumbsUp} label="Avaliações" onNavigate={onClose} />}
-          {pages.settings && <NavItem to="/configuracoes" icon={Settings} label="Configurações" onNavigate={onClose} />}
         </nav>
 
         <div className="flex items-center gap-1 border-t border-stone-200 dark:border-stone-800 px-2 py-2 text-sm">

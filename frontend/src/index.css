@@ -11,10 +11,14 @@
   /* Laranja da versão anterior, mantido como única cor de destaque. */
   --color-accent-50: #fdf3ee;
   --color-accent-100: #fbe3d6;
+  --color-accent-200: #f6c4a9;
+  --color-accent-300: #efa27c;
   --color-accent-400: #e8805a;
   --color-accent-500: #d7582b;
   --color-accent-600: #bf4a21;
   --color-accent-700: #9c3c1b;
+  --color-accent-800: #7e3219;
+  --color-accent-900: #672b17;
 }
 
 @layer base {
@@ -39,7 +43,11 @@
   }
 
   ::selection {
-    @apply bg-accent-100 dark:bg-accent-500/40;
+    background-color: var(--color-accent-100);
+  }
+
+  .dark ::selection {
+    background-color: color-mix(in oklab, var(--color-accent-500) 40%, transparent);
   }
 }
 
@@ -56,4 +64,12 @@
 
 .animate-fade-up {
   animation: fade-up 180ms ease-out;
+}
+
+/* Listas que deslizam na horizontal (separadores no telemóvel) sem mostrar a barra de scroll. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

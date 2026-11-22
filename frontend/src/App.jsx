@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, CheckCircle2, X } from "lucide-react";
 import {
   askAgentStream,
@@ -15,6 +15,7 @@ import {
   setToken,
   reindexDocument,
   renameDocument,
+  research,
   uploadDocument,
 } from "./api";
 import ChatPanel from "./components/ChatPanel";
@@ -30,8 +31,10 @@ import ProjectsPage from "./pages/ProjectsPage";
 import SearchPage from "./pages/SearchPage";
 import SettingsPage from "./pages/SettingsPage";
 import UsersPage from "./pages/UsersPage";
+import InvitationPage from "./pages/InvitationPage";
 import ProjectPage from "./pages/project/ProjectPage";
 import { ResearchProvider } from "./research/ResearchContext";
+import { ConfirmProvider, useConfirm } from "./components/ui";
 import { useTheme } from "./theme";
 
 const CHAT_STORAGE_PREFIX = "rag-study-chat-history";
@@ -89,6 +92,7 @@ const FEEDBACK_READ = "feedback:read";
 
 function Workspace({ session, authConfig, onLogout }) {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const can = (permission) => session.permissions.includes(permission);
   const canReadDocuments = can(DOCUMENTS_READ);
   // Cada utilizador tem a sua conversa guardada no browser.
@@ -99,7 +103,21 @@ function Workspace({ session, authConfig, onLogout }) {
   const [uploadingName, setUploadingName] = useState("");
   const [reviewingDocument, setReviewingDocument] = useState(null);
   // Projeto de pesquisa onde o chat pesquisa ("" = toda a base).
-  const [activeProjectId, setActiveProjectId] = useState("");
+  const [activeProjectId, setActiveProjectId] = useState(() => {
+    try {
+      return localStorage.getItem(`${CHAT_STORAGE_KEY}:project`) || "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    try {
+      if (activeProjectId) localStorage.setItem(`${CHAT_STORAGE_KEY}:project`, activeProjectId);
+      else localStorage.removeItem(`${CHAT_STORAGE_KEY}:project`);
+    } catch {
+      // Sem localStorage o projeto ativo dura só enquanto a página estiver aberta.
+    }
+  }, [activeProjectId]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useTheme();
 
@@ -121,6 +139,15 @@ function Workspace({ session, authConfig, onLogout }) {
     }
     return created;
   });
+  // Conversa guardada no projeto ativo: { id, projectId, title, canEdit } ou null (ainda não guardada).
+  const [conversation, setConversation] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`${CHAT_STORAGE_KEY}:conversation`)) || null;
+    } catch {
+      return null;
+    }
+  });
+  const lastSavedRef = useRef("");
   const [mode, setMode] = useState("agent");
   const [profiles, setProfiles] = useState([]);
   const [profile, setProfile] = useState("");
@@ -143,6 +170,50 @@ function Workspace({ session, authConfig, onLogout }) {
   useEffect(() => {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
   }, [messages]);
+
+  useEffect(() => {
+    try {
+      if (conversation) localStorage.setItem(`${CHAT_STORAGE_KEY}:conversation`, JSON.stringify(conversation));
+      else localStorage.removeItem(`${CHAT_STORAGE_KEY}:conversation`);
+    } catch {
+      // Sem localStorage, a ligação à conversa dura só enquanto a página estiver aberta.
+    }
+  }, [conversation]);
+
+  // Ao mudar de projeto (ou sair dele), as perguntas seguintes vão para outra conversa.
+  useEffect(() => {
+    if (conversation && conversation.projectId !== activeProjectId) setConversation(null);
+  }, [activeProjectId]);
+
+  // As perguntas feitas num projeto ficam guardadas numa conversa do projeto, visível aos outros membros.
+  // Guarda quando a resposta termina (e quando se aceita/rejeita uma proposta).
+  useEffect(() => {
+    const projectId = conversation?.projectId || activeProjectId;
+    if (asking || !projectId || !can(RESEARCH_USE)) return undefined;
+    const toSave = messages
+      .filter((m) => m.projectId === projectId && (m.answer || m.stopped))
+      .map(({ retrievalDiagnostics, ...m }) => m);
+    if (!toSave.length) return undefined;
+    const snapshot = JSON.stringify([conversation?.id || "", toSave]);
+    if (snapshot === lastSavedRef.current) return undefined;
+    const timer = setTimeout(async () => {
+      lastSavedRef.current = snapshot;
+      try {
+        if (conversation?.id && conversation.canEdit) {
+          await research.saveConversation(projectId, conversation.id, { messages: toSave });
+        } else {
+          // Nova conversa, ou continuação de uma conversa de outra pessoa (fica uma cópia tua).
+          const created = await research.createConversation(projectId, { messages: toSave });
+          lastSavedRef.current = JSON.stringify([created.conversation_id, toSave]);
+          setConversation({ id: created.conversation_id, projectId, title: created.title, canEdit: true });
+        }
+      } catch (err) {
+        lastSavedRef.current = "";
+        notify(`A conversa não ficou guardada no projeto: ${err.message}`, "error");
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [messages, asking, activeProjectId, conversation]);
 
   const dismissNotice = useCallback(() => setNotice(null), []);
   const previousStatuses = useRef({});
@@ -258,6 +329,9 @@ function Workspace({ session, authConfig, onLogout }) {
           }
           if (event === "export") {
             updateMessage(pendingIndex, (msg) => ({ exports: [...msg.exports, data] }));
+          }
+          if (event === "proposal") {
+            updateMessage(pendingIndex, (msg) => ({ proposals: [...(msg.proposals || []), data] }));
           }
           if (event === "sources") {
             updateMessage(pendingIndex, () => ({ sources: data.sources || [] }));
@@ -470,7 +544,30 @@ function Workspace({ session, authConfig, onLogout }) {
   function handleClearChat() {
     handleStop();
     setMessages([]);
+    setConversation(null);
+    lastSavedRef.current = "";
     localStorage.removeItem(CHAT_STORAGE_KEY);
+  }
+
+  // Abre uma conversa guardada no projeto para a continuar no chat.
+  async function openConversation(projectId, conversationId) {
+    const saved = await research.conversation(projectId, conversationId);
+    handleStop();
+    setActiveProjectId(projectId);
+    setConversation({ id: saved.conversation_id, projectId, title: saved.title, canEdit: saved.can_edit });
+    lastSavedRef.current = JSON.stringify([saved.conversation_id, saved.messages]);
+    setMessages(saved.messages);
+    navigate("/");
+  }
+
+  // Conversar no projeto: continua a conversa atual se já for deste projeto, senão começa uma nova. `draft`
+  // deixa uma pergunta começada na caixa (ex.: "Sobre RF-003: "). É o agente que lê o caderno, por isso fica nesse modo.
+  function chatInProject(projectId, draft = "") {
+    if (activeProjectId !== projectId || !messages.every((m) => m.projectId === projectId)) handleClearChat();
+    setActiveProjectId(projectId);
+    setMode("agent");
+    if (draft) setQuestion(draft);
+    navigate("/");
   }
 
   function handleExportChat() {
@@ -502,13 +599,21 @@ function Workspace({ session, authConfig, onLogout }) {
   const openSidebar = () => setSidebarOpen(true);
 
   return (
-    <ResearchProvider notify={notify} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId}>
+    <ResearchProvider
+      notify={notify}
+      activeProjectId={activeProjectId}
+      setActiveProjectId={setActiveProjectId}
+      chat={{ conversation, openConversation, chatInProject, newChat: handleClearChat }}
+    >
       <div className="flex h-full overflow-hidden">
         <Sidebar
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
-          onNewChat={() => {
+          onNewChat={async () => {
+            // Numa conversa de projeto nada se perde (fica no projeto); fora dele, a conversa só existe neste browser.
+            if (messages.length && !conversation && !(await confirm({ title: "Começar uma conversa nova?", message: "Esta conversa não está guardada em nenhum projeto e vai ser apagada.", confirmLabel: "Apagar e começar" }))) return;
             handleClearChat();
+            setActiveProjectId("");
             setSidebarOpen(false);
             navigate("/");
           }}
@@ -535,6 +640,8 @@ function Workspace({ session, authConfig, onLogout }) {
                 documents={indexedDocuments}
                 pendingCount={documents.length - indexedDocuments.length}
                 knowsDocuments={canReadDocuments}
+                canCreateProject={can(RESEARCH_USE)}
+                onMessageChange={updateMessage}
                 question={question}
                 onQuestionChange={setQuestion}
                 onAsk={handleAsk}
@@ -574,7 +681,7 @@ function Workspace({ session, authConfig, onLogout }) {
               <Route path="/descobrir" element={<DiscoverPage onOpenSidebar={openSidebar} />} />
               <Route path="/projetos" element={<ProjectsPage onOpenSidebar={openSidebar} />} />
               <Route
-                path="/projetos/:projectId"
+                path="/projetos/:projectId/*"
                 element={<ProjectPage currentUserId={session.user.user_id} onOpenSidebar={openSidebar} />}
               />
             </>
@@ -614,6 +721,7 @@ function Workspace({ session, authConfig, onLogout }) {
 }
 
 export default function App() {
+  const location = useLocation();
   // undefined: a verificar a sessão; null: sem sessão (mostra o login).
   const [session, setSession] = useState(undefined);
   const [authConfig, setAuthConfig] = useState({ mode: "local", roles_from_token: false });
@@ -643,6 +751,21 @@ export default function App() {
   }
 
   if (session === undefined) return null;
+  // O link de um convite abre-se com ou sem sessão (quem não tem conta pode criá-la a partir dele).
+  const invitation = location.pathname.match(/^\/convite\/([^/]+)/);
+  if (invitation) {
+    return (
+      <InvitationPage
+        token={decodeURIComponent(invitation[1])}
+        session={session}
+        authMode={authConfig.mode}
+        onLoggedIn={(info) => {
+          setLoginMessage("");
+          setSession(info);
+        }}
+      />
+    );
+  }
   if (!session) {
     return (
       <Login
@@ -656,5 +779,9 @@ export default function App() {
     );
   }
   // key: ao trocar de utilizador, o estado (conversa, documentos) começa do zero.
-  return <Workspace key={session.user.user_id} session={session} authConfig={authConfig} onLogout={handleLogout} />;
+  return (
+    <ConfirmProvider>
+      <Workspace key={session.user.user_id} session={session} authConfig={authConfig} onLogout={handleLogout} />
+    </ConfirmProvider>
+  );
 }

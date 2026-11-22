@@ -27,14 +27,15 @@ function PillSelect({ icon: Icon, value, onChange, title, children }) {
 // documentos fixados nele.
 function ProjectPill() {
   const { projects, activeProjectId, setActiveProjectId } = useResearch();
-  const usable = projects.filter((p) => p.document_count > 0);
+  // Todos os projetos: o agente trabalha com o caderno mesmo num projeto ainda sem documentos.
+  const usable = projects;
   if (!usable.length && !activeProjectId) return null;
   return (
     <PillSelect icon={FolderOpen} value={activeProjectId} onChange={setActiveProjectId} title="Onde pesquisar">
       <option value="">Toda a base</option>
       {usable.map(({ project, document_count }) => (
         <option key={project.project_id} value={project.project_id}>
-          {project.title} ({document_count})
+          {project.title} ({document_count ? `${document_count} doc.` : "sem documentos"})
         </option>
       ))}
     </PillSelect>

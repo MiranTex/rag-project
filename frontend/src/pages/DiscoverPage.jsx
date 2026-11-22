@@ -1,20 +1,26 @@
-import { useState } from "react";
-import { AlertTriangle, BookmarkPlus, CheckCircle2, CircleHelp, Compass, FileUp, Pin, ScanSearch, XCircle } from "lucide-react";
+import { useRef, useState } from "react";
+import { AlertTriangle, BookmarkPlus, CheckCircle2, CircleHelp, Compass, FileText, FileUp, Map as MapIcon, Pin, ScanSearch, Telescope, X, XCircle } from "lucide-react";
 import { research } from "../api";
 import PageShell from "../components/PageShell";
-import { Button, Empty, ErrorText, ExcerptCard, Section, Spinner, Tabs, documentLabel, inputClass } from "../components/ui";
+import { Badge, Button, Card, EmptyState, ErrorText, ExcerptCard, Field, IconButton, Section, Spinner, Tabs, documentLabel, inputClass } from "../components/ui";
 import { useResearch } from "../research/ResearchContext";
 
 const TABS = [
-  { value: "map", label: "Mapa do tema" },
-  { value: "gaps", label: "Lacunas" },
-  { value: "text", label: "O meu texto" },
+  { value: "map", label: "Mapa do tema", icon: MapIcon },
+  { value: "gaps", label: "Lacunas", icon: Telescope },
+  { value: "text", label: "O meu texto", icon: FileText },
 ];
+
+const TAB_HINTS = {
+  map: "Um panorama do tema: subtemas, pessoas, anos, palavras-chave e as referências que mais se repetem.",
+  gaps: "O que os trabalhos sobre o tema deixaram em aberto: trabalho futuro, limitações e recomendações.",
+  text: "Cola ou carrega o teu texto: vês o que na base é parecido, parágrafo a parágrafo, e podes verificar as afirmações.",
+};
 
 function ScopeSelect({ value, onChange }) {
   const { projects } = useResearch();
   return (
-    <select className={`${inputClass} sm:max-w-64`} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Onde procurar">
+    <select className={inputClass} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">Em toda a base</option>
       {projects.map(({ project, document_count }) => (
         <option key={project.project_id} value={project.project_id} disabled={!document_count}>
@@ -34,9 +40,7 @@ function DocumentLink({ doc }) {
         {documentLabel(doc)}
         {doc.year ? ` (${doc.year})` : ""}
       </button>
-      <button type="button" title="Fixar no projeto" aria-label="Fixar no projeto" onClick={() => pinDocument(doc.document_id)} className="shrink-0 rounded p-0.5 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200">
-        <Pin className="size-3.5" />
-      </button>
+      <IconButton icon={Pin} label={`Fixar “${documentLabel(doc)}” no projeto`} onClick={() => pinDocument(doc.document_id)} className="size-6" />
     </span>
   );
 }
@@ -50,7 +54,7 @@ function Bars({ values }) {
       {entries.map(([year, count]) => (
         <div key={year} className="flex flex-1 flex-col items-center gap-1" title={`${year}: ${count}`}>
           <div className="w-full rounded-t bg-accent-400/80" style={{ height: `${(count / max) * 72}px` }} />
-          <span className="text-[10px] text-stone-500">{year}</span>
+          <span className="text-[10px] text-stone-500 dark:text-stone-400">{year}</span>
         </div>
       ))}
     </div>
@@ -58,13 +62,13 @@ function Bars({ values }) {
 }
 
 function MapView({ data }) {
-  if (!data.documents) return <Empty>Não há documentos sobre este tema.</Empty>;
+  if (!data.documents) return <EmptyState icon={MapIcon} title="Não há documentos sobre este tema">Experimenta descrever o tema de outra forma ou procurar em toda a base.</EmptyState>;
   return (
     <>
       <Section title={`${data.documents} documentos, ${data.clusters.length} subtema${data.clusters.length === 1 ? "" : "s"}`}>
         <div className="grid gap-3 sm:grid-cols-2">
           {data.clusters.map((cluster) => (
-            <div key={cluster.label} className="rounded-xl border border-stone-200 p-4 dark:border-stone-800">
+            <Card key={cluster.label} className="p-4">
               <h3 className="mb-2 text-sm font-semibold">{cluster.label}</h3>
               <ul className="space-y-1 text-sm">
                 {cluster.documents.map((doc) => (
@@ -73,7 +77,7 @@ function MapView({ data }) {
                   </li>
                 ))}
               </ul>
-            </div>
+            </Card>
           ))}
         </div>
       </Section>
@@ -83,7 +87,7 @@ function MapView({ data }) {
             {data.people.map((p) => (
               <li key={`${p.name}-${p.role}`} className="flex gap-2">
                 <span className="flex-1">{p.name}</span>
-                <span className="text-stone-500">
+                <span className="text-stone-500 dark:text-stone-400">
                   {p.role} · {p.count}
                 </span>
               </li>
@@ -98,9 +102,9 @@ function MapView({ data }) {
         <Section title="Palavras-chave">
           <div className="flex flex-wrap gap-1.5">
             {data.keywords.map((k) => (
-              <span key={k.keyword} className="rounded-full bg-stone-200/70 px-2.5 py-0.5 text-xs dark:bg-stone-800">
-                {k.keyword} <span className="text-stone-500">{k.count}</span>
-              </span>
+              <Badge key={k.keyword}>
+                {k.keyword} <span className="font-normal text-stone-500 dark:text-stone-400">{k.count}</span>
+              </Badge>
             ))}
           </div>
         </Section>
@@ -110,7 +114,7 @@ function MapView({ data }) {
           <ol className="list-decimal space-y-1 pl-5 text-sm">
             {data.references.map((r) => (
               <li key={r.reference}>
-                {r.reference} <span className="text-stone-500">({r.cited_by} documentos)</span>
+                {r.reference} <span className="text-stone-500 dark:text-stone-400">({r.cited_by} documentos)</span>
               </li>
             ))}
           </ol>
@@ -133,23 +137,23 @@ function GapsView({ data }) {
         <Section title="Temas por explorar" description="Sugestões a partir do que os trabalhos deixaram em aberto. Confirma nos documentos.">
           <div className="space-y-3">
             {data.suggestions.map((s) => (
-              <div key={s.title} className="rounded-xl border border-stone-200 p-4 dark:border-stone-800">
+              <Card key={s.title} className="p-4">
                 <h3 className="text-sm font-semibold">{s.title}</h3>
                 <p className="mt-1 text-sm text-stone-700 dark:text-stone-300">{s.description}</p>
-                <p className="mt-2 flex flex-wrap gap-x-3 text-xs text-stone-500">
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 text-xs text-stone-500 dark:text-stone-400">
                   Com base em:
                   {s.documents.map((d) => (
                     <DocumentLink key={d.document_id} doc={d} />
                   ))}
                 </p>
-              </div>
+              </Card>
             ))}
           </div>
         </Section>
       )}
       <Section title="O que ficou em aberto">
         {documents.length === 0 ? (
-          <Empty>Nenhum documento com trabalho futuro, limitações ou recomendações sobre este tema.</Empty>
+          <EmptyState icon={Telescope} title="Nada em aberto">Nenhum documento com trabalho futuro, limitações ou recomendações sobre este tema.</EmptyState>
         ) : (
           <div className="space-y-3">
             {documents.map((doc) =>
@@ -159,7 +163,7 @@ function GapsView({ data }) {
                   excerpt={{ ...doc, page: open.pages, text: open.text }}
                   onOpen={() => openReader({ document_id: doc.document_id, page: Number(String(open.pages).split("–")[0]), text: open.text })}
                 >
-                  {open.section && <p className="mt-1 text-xs text-stone-500">{open.section}</p>}
+                  {open.section && <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">{open.section}</p>}
                 </ExcerptCard>
               )),
             )}
@@ -174,7 +178,7 @@ const VERDICTS = {
   supported: { label: "Apoiada", icon: CheckCircle2, className: "text-emerald-700 dark:text-emerald-400" },
   contradicted: { label: "Contradita", icon: XCircle, className: "text-red-700 dark:text-red-400" },
   unsupported: { label: "Sem apoio na base", icon: CircleHelp, className: "text-amber-700 dark:text-amber-400" },
-  unchecked: { label: "Por verificar (modelo indisponível)", icon: CircleHelp, className: "text-stone-500" },
+  unchecked: { label: "Por verificar (modelo indisponível)", icon: CircleHelp, className: "text-stone-500 dark:text-stone-400" },
 };
 
 function TextView({ data, onCheckClaims, checking, claims }) {
@@ -187,9 +191,9 @@ function TextView({ data, onCheckClaims, checking, claims }) {
             {data.overlap.map((doc) => (
               <div key={doc.document_id} className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950/30">
                 <p className="flex items-center gap-2 font-medium">
-                  <AlertTriangle className="size-4 text-amber-600" />
+                  <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <DocumentLink doc={doc} />
-                  <span className="ml-auto text-xs text-stone-500">
+                  <span className="ml-auto text-xs text-stone-500 dark:text-stone-400">
                     {doc.level === "high" ? "quase o mesmo" : "muito próximo"} · {Math.round(doc.similarity * 100)}%
                   </span>
                 </p>
@@ -206,7 +210,7 @@ function TextView({ data, onCheckClaims, checking, claims }) {
               <span className="min-w-0 flex-1">
                 <DocumentLink doc={doc} />
               </span>
-              {doc.similarity != null && <span className="text-stone-500">{Math.round(doc.similarity * 100)}%</span>}
+              {doc.similarity != null && <span className="text-stone-500 dark:text-stone-400">{Math.round(doc.similarity * 100)}%</span>}
             </li>
           ))}
         </ul>
@@ -222,12 +226,12 @@ function TextView({ data, onCheckClaims, checking, claims }) {
       >
         {claims && (
           <div className="mb-6 space-y-3">
-            {claims.length === 0 && <Empty>Não encontrei afirmações para verificar.</Empty>}
+            {claims.length === 0 && <EmptyState title="Sem afirmações">Não encontrei afirmações para verificar.</EmptyState>}
             {claims.map((c, i) => {
               const verdict = VERDICTS[c.verdict] || VERDICTS.unchecked;
               const Icon = verdict.icon;
               return (
-                <div key={i} className="rounded-xl border border-stone-200 p-3 text-sm dark:border-stone-800">
+                <Card key={i} className="p-3 text-sm">
                   <p className="font-medium">“{c.claim}”</p>
                   <p className={`mt-1 flex items-center gap-1.5 ${verdict.className}`}>
                     <Icon className="size-4" />
@@ -239,7 +243,7 @@ function TextView({ data, onCheckClaims, checking, claims }) {
                       <ExcerptCard key={`${e.document_id}-${e.page}`} excerpt={e} onOpen={() => openReader(e)} />
                     ))}
                   </div>
-                </div>
+                </Card>
               );
             })}
           </div>
@@ -282,6 +286,7 @@ export default function DiscoverPage({ onOpenSidebar }) {
   const [topic, setTopic] = useState("");
   const [text, setText] = useState("");
   const [file, setFile] = useState(null);
+  const fileRef = useRef(null);
   const [results, setResults] = useState({});
   const [claims, setClaims] = useState(null);
   const [busy, setBusy] = useState("");
@@ -319,70 +324,101 @@ export default function DiscoverPage({ onOpenSidebar }) {
   return (
     <PageShell
       title="Descobrir"
-      description="Por onde começar: um panorama do tema, o que ficou por estudar e o que na base se parece com o teu texto."
+      subtitle="Por onde começar: um panorama do tema, o que ficou por estudar e o que na base se parece com o teu texto."
+      width="wide"
+      tabs={<Tabs inHeader tabs={TABS} value={tab} onChange={setTab} label="Tipo de análise" />}
       onOpenSidebar={onOpenSidebar}
     >
-      <Tabs tabs={TABS} value={tab} onChange={setTab} />
-      <div className="mb-3">
-        <ScopeSelect value={projectId} onChange={setProjectId} />
-      </div>
-
-      {tab !== "text" ? (
-        <form
-          className="mb-6 flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (topic.trim().length < 3) return;
-            run(tab, () => (tab === "map" ? research.map(topicRequest()) : research.gaps(topicRequest())));
-          }}
-        >
-          <input
-            className={inputClass}
-            placeholder="Descreve o tema numa frase (ex.: sistemas de recomendação de livros em bibliotecas)"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-          />
-          <Button type="submit" variant="primary" icon={Compass} busy={busy === tab}>
-            {tab === "map" ? "Ver mapa" : "Procurar lacunas"}
-          </Button>
-        </form>
-      ) : (
-        <div className="mb-6 space-y-2">
-          <textarea
-            className={inputClass}
-            rows={8}
-            placeholder="Cola aqui o teu texto: um resumo, uma proposta, um capítulo. Não é guardado."
-            value={text}
-            disabled={!!file}
-            onChange={(e) => setText(e.target.value)}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800">
-              <FileUp className="size-4" />
-              {file ? file.name : "Ou carrega um ficheiro (PDF, Word, texto)"}
-              <input type="file" accept=".pdf,.docx,.txt,.md" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            </label>
-            {file && (
-              <Button variant="ghost" onClick={() => setFile(null)}>
-                Usar o texto colado
+      <p className="mb-4 text-sm text-stone-500 dark:text-stone-400">{TAB_HINTS[tab]}</p>
+      <Card className="mb-6 p-4">
+        {tab !== "text" ? (
+          <form
+            className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_16rem]"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (topic.trim().length < 3) return;
+              run(tab, () => (tab === "map" ? research.map(topicRequest()) : research.gaps(topicRequest())));
+            }}
+          >
+            <Field label="Tema" hint="Descreve-o numa frase.">
+              <input
+                className={inputClass}
+                placeholder="ex.: sistemas de recomendação de livros em bibliotecas"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+              />
+            </Field>
+            <Field label="Onde procurar">
+              <ScopeSelect value={projectId} onChange={setProjectId} />
+            </Field>
+            <div className="flex justify-end sm:col-span-2">
+              <Button type="submit" variant="primary" icon={Compass} busy={busy === tab} disabled={topic.trim().length < 3}>
+                {tab === "map" ? "Ver mapa" : "Procurar lacunas"}
               </Button>
-            )}
-            <Button
-              variant="primary"
-              icon={ScanSearch}
-              busy={busy === "text"}
-              className="ml-auto"
-              disabled={!file && text.trim().length < 50}
-              onClick={() => {
-                setClaims(null);
-                run("text", () => research.analyzeText({ text, file, projectId }));
-              }}
-            >
-              Comparar com a base
-            </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="space-y-3">
+            <Field label="O teu texto" hint="Um resumo, uma proposta, um capítulo (mín. 50 caracteres). Não é guardado.">
+              <textarea
+                className={inputClass}
+                rows={8}
+                placeholder={file ? `A usar o ficheiro ${file.name}` : "Cola aqui o teu texto"}
+                value={text}
+                disabled={!!file}
+                onChange={(e) => setText(e.target.value)}
+              />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_16rem]">
+              <div>
+                <span className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Ou um ficheiro</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button icon={FileUp} onClick={() => fileRef.current?.click()}>
+                    {file ? "Escolher outro" : "Carregar ficheiro (PDF, Word, texto)"}
+                  </Button>
+                  {file && (
+                    <Badge tone="accent">
+                      <span className="truncate">{file.name}</span>
+                      <button type="button" aria-label="Usar o texto colado em vez do ficheiro" title="Usar o texto colado" onClick={() => setFile(null)} className="-mr-0.5 shrink-0 rounded opacity-70 hover:opacity-100">
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  )}
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".pdf,.docx,.txt,.md"
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onChange={(e) => {
+                      setFile(e.target.files?.[0] || null);
+                      e.target.value = "";
+                    }}
+                  />
+                </div>
+              </div>
+              <Field label="Onde procurar">
+                <ScopeSelect value={projectId} onChange={setProjectId} />
+              </Field>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                variant="primary"
+                icon={ScanSearch}
+                busy={busy === "text"}
+                disabled={!file && text.trim().length < 50}
+                onClick={() => {
+                  setClaims(null);
+                  run("text", () => research.analyzeText({ text, file, projectId }));
+                }}
+              >
+                Comparar com a base
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </Card>
 
       <ErrorText>{error}</ErrorText>
       {busy && busy !== "claims" && <Spinner label="A analisar a base…" />}

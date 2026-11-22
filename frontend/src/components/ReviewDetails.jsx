@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronRight, FileSearch, Loader2 } from "lucide-react";
+import { inputClass } from "./ui";
 
 // Listas editam-se como texto separado por ";" (nomes como "Silva, J." levam vírgula).
 const joinList = (values) => (Array.isArray(values) ? values.join("; ") : values || "");
@@ -37,8 +38,6 @@ export function fromDraft(draft, docType) {
   };
 }
 
-const input =
-  "w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none transition-colors placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:placeholder:text-stone-500 dark:focus:border-stone-500";
 
 function Field({ label, hint, className = "", children }) {
   return (
@@ -115,7 +114,7 @@ export function MetadataCard({ metadata, types, draft, onDraftChange, dirty, rea
       ) : (
         <div className="grid gap-3 px-4 py-3 sm:grid-cols-6">
           <Field label="Tipo de documento" hint={docType?.description} className="sm:col-span-5">
-            <select className={input} value={docType?.key || ""} onChange={set("document_type")}>
+            <select className={inputClass} value={docType?.key || ""} onChange={set("document_type")}>
               {types.map((t) => (
                 <option key={t.key} value={t.key}>
                   {t.label}
@@ -124,24 +123,24 @@ export function MetadataCard({ metadata, types, draft, onDraftChange, dirty, rea
             </select>
           </Field>
           <Field label="Ano" className="sm:col-span-1">
-            <input className={input} value={draft.year} onChange={set("year")} inputMode="numeric" maxLength={4} />
+            <input className={inputClass} value={draft.year} onChange={set("year")} inputMode="numeric" maxLength={4} />
           </Field>
           <Field label="Título" className="sm:col-span-6">
-            <input className={input} value={draft.title} onChange={set("title")} placeholder="Não encontrado" />
+            <input className={inputClass} value={draft.title} onChange={set("title")} placeholder="Não encontrado" />
           </Field>
           <Field label="Autores" hint="separados por ;" className="sm:col-span-6">
-            <input className={input} value={draft.authors} onChange={set("authors")} />
+            <input className={inputClass} value={draft.authors} onChange={set("authors")} />
           </Field>
           {docType?.fields.map((field) => (
             <Field key={field.key} label={field.label} hint={fieldHint(field)} className="sm:col-span-3">
-              <input className={input} value={draft.fields[field.key] || ""} onChange={setField(field.key)} />
+              <input className={inputClass} value={draft.fields[field.key] || ""} onChange={setField(field.key)} />
             </Field>
           ))}
           <Field label="Palavras-chave" hint="separadas por ;" className="sm:col-span-6">
-            <input className={input} value={draft.keywords} onChange={set("keywords")} />
+            <input className={inputClass} value={draft.keywords} onChange={set("keywords")} />
           </Field>
           <Field label="Resumo" className="sm:col-span-6">
-            <textarea className={`${input} resize-y leading-relaxed`} rows={4} value={draft.abstract} onChange={set("abstract")} />
+            <textarea className={`${inputClass} resize-y leading-relaxed`} rows={4} value={draft.abstract} onChange={set("abstract")} />
           </Field>
         </div>
       )}

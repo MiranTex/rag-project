@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, BookmarkPlus, Copy, FileDown, ListTree, PenLine } from "lucide-react";
 import { research } from "../../api";
 import Markdown from "../../components/Markdown";
-import { Button, Empty, ErrorText, ExcerptCard, Section, Spinner, Tabs, inputClass } from "../../components/ui";
+import { Button, Empty, ErrorText, ExcerptCard, Field, Section, Spinner, Tabs, controlBase, inputClass } from "../../components/ui";
 import { useResearch } from "../../research/ResearchContext";
 
 const TABS = [
@@ -81,9 +81,12 @@ function SkeletonTab({ detail, canSave }) {
         O índice do trabalho com as secções do tipo escolhido. Em cada secção: perguntas a responder, o que ler (dos documentos do projeto) e
         exemplos de como outros trabalhos da base escreveram essa secção.
       </p>
-      <div className="mb-6 flex flex-wrap gap-2">
-        <input className={`${inputClass} min-w-64 flex-1`} placeholder="Tema do trabalho" value={topic} onChange={(e) => setTopic(e.target.value)} />
-        <select className={`${inputClass} w-auto`} value={workType} onChange={(e) => setWorkType(e.target.value)} aria-label="Tipo de trabalho">
+      <div className="mb-6 grid items-end gap-3 sm:grid-cols-[1fr_14rem_auto]">
+        <Field label="Tema">
+          <input className={inputClass} placeholder="Tema do trabalho" value={topic} onChange={(e) => setTopic(e.target.value)} />
+        </Field>
+        <Field label="Tipo de documento">
+        <select className={inputClass} value={workType} onChange={(e) => setWorkType(e.target.value)}>
           <option value="">Tipo por defeito</option>
           {workTypes.map((t) => (
             <option key={t.key} value={t.key}>
@@ -91,6 +94,7 @@ function SkeletonTab({ detail, canSave }) {
             </option>
           ))}
         </select>
+        </Field>
         <Button variant="primary" icon={ListTree} busy={busy} disabled={topic.trim().length < 3} onClick={generate}>
           Gerar esqueleto
         </Button>
@@ -175,8 +179,10 @@ function StateOfArtTab({ detail, canSave }) {
         Um rascunho escrito só com o que está nos documentos do projeto. Cada frase cita o excerto em que se apoia ([n]); as que não citam ficam
         assinaladas para reveres.
       </p>
-      <div className="mb-6 flex flex-wrap gap-2">
-        <input className={`${inputClass} min-w-64 flex-1`} placeholder="Foco (por defeito, a pergunta de investigação)" value={topic} onChange={(e) => setTopic(e.target.value)} />
+      <div className="mb-6 grid items-end gap-3 sm:grid-cols-[1fr_auto]">
+        <Field label="Foco (vazio: o objetivo do projeto)">
+          <input className={inputClass} placeholder={detail.project.question || "Sobre o que escrever"} value={topic} onChange={(e) => setTopic(e.target.value)} />
+        </Field>
         <Button variant="primary" icon={PenLine} busy={busy} onClick={generate}>
           Escrever rascunho
         </Button>
@@ -239,7 +245,7 @@ function BibliographyTab({ detail }) {
         Referências dos documentos do projeto, geradas da ficha de cada um. Confirma os dados antes de entregar (editora, local, etc.).
       </p>
       <div className="mb-4 flex flex-wrap gap-2">
-        <select className={`${inputClass} w-auto`} value={style} onChange={(e) => setStyle(e.target.value)} aria-label="Norma">
+        <select className={`${controlBase} w-auto`} value={style} onChange={(e) => setStyle(e.target.value)} aria-label="Norma">
           <option value="apa">APA 7</option>
           <option value="iso690">NP 405 / ISO 690</option>
           <option value="bibtex">BibTeX</option>
@@ -273,10 +279,17 @@ export default function Writing({ detail }) {
   const canSave = detail.my_role !== "viewer";
   return (
     <>
-      <Tabs tabs={TABS} value={tab} onChange={setTab} />
-      {tab === "skeleton" && <SkeletonTab detail={detail} canSave={canSave} />}
-      {tab === "state" && <StateOfArtTab detail={detail} canSave={canSave} />}
-      {tab === "bibliography" && <BibliographyTab detail={detail} />}
+      <Tabs tabs={TABS} value={tab} onChange={setTab} variant="pills" label="Tipo de texto" />
+      {/* Os três ficam montados: um esqueleto ou estado da arte gerado não se perde ao mudar de subseparador. */}
+      <div hidden={tab !== "skeleton"}>
+        <SkeletonTab detail={detail} canSave={canSave} />
+      </div>
+      <div hidden={tab !== "state"}>
+        <StateOfArtTab detail={detail} canSave={canSave} />
+      </div>
+      <div hidden={tab !== "bibliography"}>
+        <BibliographyTab detail={detail} />
+      </div>
     </>
   );
 }

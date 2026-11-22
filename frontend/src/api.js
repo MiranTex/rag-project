@@ -455,6 +455,8 @@ export const research = {
 
   projects: () => get("/research/projects", "Falha ao carregar os projetos"),
   createProject: (body) => post("/research/projects", body, "Falha ao criar o projeto"),
+  draftFromConversation: (body) => post("/research/projects/draft-from-conversation", body, "Falha ao preparar a proposta de projeto"),
+  createFromDraft: (body) => post("/research/projects/from-draft", body, "Falha ao criar o projeto"),
   project: (id) => get(`/research/projects/${id}`, "Projeto não encontrado"),
   updateProject: (id, body) => jsonRequest(`/research/projects/${id}`, "PATCH", body, "Falha ao guardar o projeto"),
   deleteProject: (id) => jsonRequest(`/research/projects/${id}`, "DELETE", undefined, "Falha ao apagar o projeto"),
@@ -476,6 +478,30 @@ export const research = {
   fillMatrix: (id, body) => post(`/research/projects/${id}/matrix/fill`, body, "Falha ao preencher a matriz"),
   bibliography: (id, style) => get(`/research/projects/${id}/bibliography${query({ style })}`, "Falha ao gerar a bibliografia"),
   stateOfArt: (id, body) => post(`/research/projects/${id}/state-of-the-art`, body, "Falha ao gerar o estado da arte"),
+
+  conversations: (id) => get(`/research/projects/${id}/conversations`, "Falha ao carregar as conversas"),
+  conversation: (id, cid) => get(`/research/projects/${id}/conversations/${cid}`, "Conversa não encontrada"),
+  createConversation: (id, body) => post(`/research/projects/${id}/conversations`, body, "Falha ao guardar a conversa"),
+  saveConversation: (id, cid, body) => jsonRequest(`/research/projects/${id}/conversations/${cid}`, "PUT", body, "Falha ao guardar a conversa"),
+  deleteConversation: (id, cid) =>
+    jsonRequest(`/research/projects/${id}/conversations/${cid}`, "DELETE", undefined, "Falha ao apagar a conversa"),
+
+  invitations: (id) => get(`/research/projects/${id}/invitations`, "Falha ao carregar os convites"),
+  invite: (id, body) => post(`/research/projects/${id}/invitations`, body, "Falha ao criar o convite"),
+  revokeInvitation: (id, invitationId) =>
+    jsonRequest(`/research/projects/${id}/invitations/${invitationId}`, "DELETE", undefined, "Falha ao anular o convite"),
+};
+
+// ---- Convites (a página do convite abre-se também sem sessão) ----
+
+export const invitations = {
+  info: (token) => get(`/invitations/${encodeURIComponent(token)}`, "Convite não encontrado"),
+  accept: (token) => post(`/invitations/${encodeURIComponent(token)}/accept`, {}, "Não foi possível aceitar o convite"),
+  async signup(token, body) {
+    const data = await post(`/invitations/${encodeURIComponent(token)}/signup`, body, "Não foi possível criar a conta");
+    setToken(data.access_token);
+    return data.user;
+  },
 };
 
 export function sendFeedback(body) {

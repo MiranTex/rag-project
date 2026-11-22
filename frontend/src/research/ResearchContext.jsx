@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { BookmarkPlus, ChevronLeft, ChevronRight, ExternalLink, FolderPlus, Pin, X } from "lucide-react";
 import { research } from "../api";
-import { Button, ErrorText, Spinner, documentLabel, inputClass } from "../components/ui";
+import { Button, ErrorText, Modal, Spinner, documentLabel, inputClass } from "../components/ui";
 
 // Projetos da pessoa, o leitor de documentos e "guardar no projeto", disponíveis em todas as páginas.
 const ResearchContext = createContext(null);
@@ -10,33 +10,8 @@ export function useResearch() {
   return useContext(ResearchContext);
 }
 
-function Modal({ title, onClose, children, wide = false }) {
-  useEffect(() => {
-    function onKey(event) {
-      if (event.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-stone-900/40 sm:items-center sm:p-6" role="dialog" aria-modal="true">
-      <section
-        className={`animate-fade-up flex h-full w-full flex-col bg-stone-50 dark:bg-stone-950 sm:h-auto sm:max-h-full sm:rounded-2xl sm:shadow-xl ${
-          wide ? "max-w-3xl" : "max-w-md"
-        }`}
-      >
-        <header className="flex items-start gap-3 border-b border-stone-200 px-5 py-4 dark:border-stone-800">
-          <h2 className="min-w-0 flex-1 font-semibold">{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Fechar" className="rounded-md p-1 text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-800">
-            <X className="size-5" />
-          </button>
-        </header>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
-      </section>
-    </div>
-  );
-}
+// A janela vive em components/ui; reexportada para quem a importava daqui.
+export { Modal };
 
 // Escolher o projeto onde guardar (ou criar um novo). Só aparecem projetos onde a pessoa pode escrever.
 function ProjectPicker({ request, projects, lastProjectId, onDone, onCreated }) {
@@ -195,15 +170,29 @@ function Reader({ target, onClose, onSave, onPin }) {
 }
 
 // O projeto ativo (onde o chat pesquisa) vem de fora: quem envia as perguntas precisa dele.
-export function ResearchProvider({ notify, activeProjectId, setActiveProjectId, children }) {
+// `chat`: a conversa guardada no projeto e as ações para a abrir ou começar (vêm do App, que tem o chat).
+export function ResearchProvider({ notify, activeProjectId, setActiveProjectId, chat = {}, children }) {
   const [projects, setProjects] = useState([]);
   const [lastProjectId, setLastProjectId] = useState("");
   const [reader, setReader] = useState(null);
   const [picker, setPicker] = useState(null);
 
-  const refreshProjects = useCallback(() => research.projects().then(setProjects).catch(() => setProjects([])), []);
+  const refreshProjects = useCallback(
+    () =>
+      research
+        .projects()
+        .then((list) => {
+          setProjects(list);
+          return list;
+        })
+        .catch(() => setProjects([])),
+    [],
+  );
   useEffect(() => {
-    refreshProjects();
+    // Projeto ativo guardado de outra sessão que já não existe (ou de que a pessoa saiu): volta a toda a base.
+    refreshProjects().then((list) => {
+      if (list && activeProjectId && !list.some((p) => p.project.project_id === activeProjectId)) setActiveProjectId("");
+    });
   }, [refreshProjects]);
 
   const saveItem = useCallback(
@@ -235,6 +224,7 @@ export function ResearchProvider({ notify, activeProjectId, setActiveProjectId, 
     saveItem,
     pinDocument,
     notify,
+    ...chat,
   };
 
   return (

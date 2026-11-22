@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { FileDown, Save, Wand2, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { FileDown, Save, Table2, Wand2, X } from "lucide-react";
 import { research } from "../../api";
-import { Button, Empty, ErrorText, Spinner, documentLabel, inputClass } from "../../components/ui";
+import { Button, Empty, EmptyState, ErrorText, Spinner, documentLabel, inputClass } from "../../components/ui";
 import { useResearch } from "../../research/ResearchContext";
 
 const SUGGESTED = ["Objetivo", "Método", "Dados", "Principais resultados", "Limitações"];
@@ -26,6 +27,7 @@ function Cell({ cell, note, canEdit, onNote, onOpen }) {
         className={`${inputClass} mt-2 text-xs`}
         rows={2}
         placeholder={canEdit ? "A tua nota" : ""}
+        aria-label="Nota"
         value={note || ""}
         disabled={!canEdit}
         onChange={(e) => onNote(e.target.value)}
@@ -51,6 +53,7 @@ function toMarkdown(matrix) {
 
 export default function Matrix({ projectId, canEdit }) {
   const { openReader, notify } = useResearch();
+  const navigate = useNavigate();
   const [matrix, setMatrix] = useState(null);
   const [newDimension, setNewDimension] = useState("");
   const [busy, setBusy] = useState("");
@@ -75,6 +78,22 @@ export default function Matrix({ projectId, canEdit }) {
   }
 
   if (!matrix) return error ? <ErrorText>{error}</ErrorText> : <Spinner label="A carregar a matriz…" />;
+  if (matrix.documents.length < 2) {
+    return (
+      <EmptyState
+        icon={Table2}
+        title="A matriz compara documentos lado a lado"
+        action={
+          <Button onClick={() => navigate(`/projetos/${projectId}/documentos`)}>
+            Ver documentos do projeto
+          </Button>
+        }
+      >
+        Fixa pelo menos 2 documentos no projeto (até 8). Depois escolhes as dimensões (método, dados, resultados…) e o assistente procura o que cada
+        documento diz sobre cada uma.
+      </EmptyState>
+    );
+  }
 
   const setDimensions = (dimensions) => {
     setMatrix({ ...matrix, dimensions });
@@ -122,7 +141,7 @@ export default function Matrix({ projectId, canEdit }) {
               setNewDimension("");
             }}
           >
-            <input className={`${inputClass} flex-1`} placeholder="Outra dimensão (máx. 6)" value={newDimension} onChange={(e) => setNewDimension(e.target.value)} />
+            <input className={`${inputClass} flex-1`} placeholder="Outra dimensão (máx. 6)" aria-label="Nova dimensão" value={newDimension} onChange={(e) => setNewDimension(e.target.value)} />
             <Button
               variant="primary"
               icon={Wand2}
@@ -142,19 +161,23 @@ export default function Matrix({ projectId, canEdit }) {
             <Button icon={Save} busy={busy === "save"} disabled={!dirty} onClick={save}>
               Guardar
             </Button>
-            <Button
-              variant="ghost"
-              icon={FileDown}
-              disabled={!matrix.dimensions.length}
-              onClick={() =>
-                research
-                  .export({ title: "Matriz de literatura", markdown: toMarkdown(matrix), format: "docx" })
-                  .then((r) => notify(`Exportado: ${r.name} (em Ficheiros)`), (err) => setError(err.message))
-              }
-            >
-              Word
-            </Button>
           </form>
+        </div>
+      )}
+      {matrix.dimensions.length > 0 && matrix.documents.length > 0 && (
+        <div className="mb-3 flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={FileDown}
+            onClick={() =>
+              research
+                .export({ title: "Matriz de literatura", markdown: toMarkdown(matrix), format: "docx" })
+                .then((r) => notify(`Exportado: ${r.name} (em Ficheiros)`), (err) => setError(err.message))
+            }
+          >
+            Exportar para Word
+          </Button>
         </div>
       )}
       <ErrorText>{error}</ErrorText>

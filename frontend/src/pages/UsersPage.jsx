@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Loader2, UserPlus } from "lucide-react";
+import { KeyRound, Loader2, UserPlus, Users } from "lucide-react";
 import { createUser, listRoles, listUsers, updateUser } from "../api";
 import PageShell from "../components/PageShell";
+import { Badge, Button, EmptyState, ErrorText, Field, IconButton, Modal, Spinner, inputClass, useConfirm } from "../components/ui";
 
 // Papéis do backend (backend/auth/permissions.py).
 const ROLE_LABELS = {
@@ -13,9 +14,6 @@ const ROLE_LABELS = {
 };
 
 const roleLabel = (role) => ROLE_LABELS[role]?.label || role;
-
-const inputClass =
-  "w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-1.5 text-sm outline-none focus:border-stone-500";
 
 function RolePicker({ roles, value, onChange, disabled }) {
   return (
@@ -44,7 +42,7 @@ function RolePicker({ roles, value, onChange, disabled }) {
   );
 }
 
-function NewUserForm({ roles, onCreated }) {
+function NewUserModal({ roles, onCreated, onClose }) {
   const [draft, setDraft] = useState({ username: "", display_name: "", password: "", roles: ["chat"] });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -55,68 +53,77 @@ function NewUserForm({ roles, onCreated }) {
     setError("");
     try {
       const user = await createUser({ ...draft, username: draft.username.trim() });
-      setDraft({ username: "", display_name: "", password: "", roles: ["chat"] });
       onCreated(user);
+      onClose();
     } catch (err) {
       setError(err.message);
-    } finally {
       setSaving(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mb-8 space-y-3 rounded-xl border border-stone-200 p-4 dark:border-stone-800">
-      <h2 className="text-sm font-medium">Novo utilizador</h2>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <input
-          className={inputClass}
-          placeholder="Utilizador"
-          aria-label="Utilizador"
-          value={draft.username}
-          onChange={(e) => setDraft({ ...draft, username: e.target.value })}
-          required
-          minLength={2}
-          autoComplete="off"
-        />
-        <input
-          className={inputClass}
-          placeholder="Nome (opcional)"
-          aria-label="Nome"
-          value={draft.display_name}
-          onChange={(e) => setDraft({ ...draft, display_name: e.target.value })}
-        />
-        <input
-          className={inputClass}
-          type="password"
-          placeholder="Palavra-passe (mín. 8)"
-          aria-label="Palavra-passe"
-          value={draft.password}
-          onChange={(e) => setDraft({ ...draft, password: e.target.value })}
-          required
-          minLength={8}
-          autoComplete="new-password"
-        />
-      </div>
-      <RolePicker roles={roles} value={draft.roles} onChange={(next) => setDraft({ ...draft, roles: next })} />
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={saving}
-          className="flex items-center gap-2 rounded-lg bg-accent-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:bg-stone-300 dark:disabled:bg-stone-700"
-        >
-          {saving ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
-          Criar
-        </button>
-        {error && <p className="text-sm text-red-700 dark:text-red-300">{error}</p>}
-      </div>
-    </form>
+    <Modal
+      title="Novo utilizador"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button type="submit" form="new-user" variant="primary" icon={UserPlus} busy={saving}>
+            Criar
+          </Button>
+        </>
+      }
+    >
+      <form id="new-user" onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Utilizador" hint="Usado para entrar. Mínimo 2 caracteres.">
+          <input
+            className={inputClass}
+            value={draft.username}
+            onChange={(e) => setDraft({ ...draft, username: e.target.value })}
+            required
+            minLength={2}
+            autoComplete="off"
+          />
+        </Field>
+        <Field label="Nome (opcional)">
+          <input className={inputClass} value={draft.display_name} onChange={(e) => setDraft({ ...draft, display_name: e.target.value })} />
+        </Field>
+        <Field label="Palavra-passe" hint="Mínimo 8 caracteres.">
+          <input
+            className={inputClass}
+            type="password"
+            value={draft.password}
+            onChange={(e) => setDraft({ ...draft, password: e.target.value })}
+            required
+            minLength={8}
+            autoComplete="new-password"
+          />
+        </Field>
+        <fieldset>
+          <legend className="mb-1 text-sm font-medium text-stone-700 dark:text-stone-300">Papéis</legend>
+          <RolePicker roles={roles} value={draft.roles} onChange={(next) => setDraft({ ...draft, roles: next })} />
+          <ul className="mt-2 space-y-0.5 text-xs text-stone-500 dark:text-stone-400">
+            {draft.roles.map((role) => (
+              <li key={role}>
+                <span className="font-medium text-stone-600 dark:text-stone-300">{roleLabel(role)}:</span> {ROLE_LABELS[role]?.hint}
+              </li>
+            ))}
+          </ul>
+        </fieldset>
+        <ErrorText>{error}</ErrorText>
+      </form>
+    </Modal>
   );
 }
 
 function UserRow({ user, roles, isSelf, canEditRoles, canSetPassword, onSaved }) {
+  const confirm = useConfirm();
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [password, setPassword] = useState(null);
+  const name = user.display_name || user.username;
 
   async function save(changes) {
     setSaving(true);
@@ -132,74 +139,70 @@ function UserRow({ user, roles, isSelf, canEditRoles, canSetPassword, onSaved })
     }
   }
 
+  async function toggleActive(active) {
+    if (
+      !active &&
+      !(await confirm({
+        title: "Desativar utilizador?",
+        message: `${name} deixa de conseguir entrar na aplicação. Podes voltar a ativar mais tarde.`,
+        confirmLabel: "Desativar",
+      }))
+    )
+      return;
+    save({ active });
+  }
+
   return (
-    <li className={`space-y-2 py-4 ${user.active ? "" : "opacity-60"}`}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-medium text-stone-800 dark:text-stone-200">{user.display_name || user.username}</span>
-        <span className="text-sm text-stone-500 dark:text-stone-400">
-          {user.username}
-          {user.external_id && " · externo"}
-          {isSelf && " · tu"}
-        </span>
+    <li className={`space-y-2 px-4 py-3 ${user.active ? "" : "bg-stone-50 dark:bg-stone-900/60"}`}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className={`font-medium ${user.active ? "text-stone-800 dark:text-stone-200" : "text-stone-500 dark:text-stone-400"}`}>{name}</span>
+        <span className="text-sm text-stone-500 dark:text-stone-400">{user.username}</span>
+        {user.external_id && <Badge tone="outline">externo</Badge>}
+        {isSelf && <Badge tone="accent">tu</Badge>}
+        {!user.active && <Badge tone="warning">desativado</Badge>}
         <div className="ml-auto flex items-center gap-2">
-          {saving && <Loader2 className="size-4 animate-spin text-stone-400" />}
+          {saving && <Loader2 className="size-4 animate-spin text-stone-400 dark:text-stone-500" />}
           {canSetPassword && !user.external_id && (
-            <button
-              type="button"
-              onClick={() => setPassword(password === null ? "" : null)}
-              title="Definir palavra-passe"
-              aria-label="Definir palavra-passe"
-              className="rounded-md p-1.5 text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800"
-            >
-              <KeyRound className="size-4" />
-            </button>
+            <IconButton icon={KeyRound} label={`Definir palavra-passe de ${name}`} onClick={() => setPassword(password === null ? "" : null)} />
           )}
-          <label className="flex items-center gap-1.5 text-sm text-stone-600 dark:text-stone-400">
-            <input
-              type="checkbox"
-              checked={user.active}
-              disabled={saving || isSelf}
-              onChange={(e) => save({ active: e.target.checked })}
-            />
+          <label className="flex items-center gap-1.5 text-sm text-stone-600 dark:text-stone-400" title={isSelf ? "Não te podes desativar a ti próprio." : undefined}>
+            <input type="checkbox" checked={user.active} disabled={saving || isSelf} onChange={(e) => toggleActive(e.target.checked)} />
             Ativo
           </label>
         </div>
       </div>
-      <RolePicker
-        roles={roles}
-        value={user.roles}
-        disabled={saving || !canEditRoles}
-        onChange={(next) => save({ roles: next })}
-      />
+      <RolePicker roles={roles} value={user.roles} disabled={saving || !canEditRoles} onChange={(next) => save({ roles: next })} />
       {password !== null && (
         <form
-          className="flex gap-2"
+          className="flex flex-wrap items-end gap-2"
           onSubmit={async (event) => {
             event.preventDefault();
             if (await save({ password })) setPassword(null);
           }}
         >
-          <input
-            className={inputClass}
-            type="password"
-            placeholder="Nova palavra-passe (mín. 8)"
-            aria-label="Nova palavra-passe"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            minLength={8}
-            required
-            autoFocus
-            autoComplete="new-password"
-          />
-          <button
-            type="submit"
-            className="shrink-0 rounded-lg border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800"
-          >
-            Guardar
-          </button>
+          <Field label="Nova palavra-passe" hint="Mínimo 8 caracteres." className="min-w-48 flex-1">
+            <input
+              className={inputClass}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={8}
+              required
+              autoFocus
+              autoComplete="new-password"
+            />
+          </Field>
+          <div className="flex gap-2 pb-5">
+            <Button variant="ghost" onClick={() => setPassword(null)}>
+              Cancelar
+            </Button>
+            <Button type="submit" variant="primary" busy={saving}>
+              Guardar
+            </Button>
+          </div>
         </form>
       )}
-      {error && <p className="text-sm text-red-700 dark:text-red-300">{error}</p>}
+      <ErrorText>{error}</ErrorText>
     </li>
   );
 }
@@ -208,6 +211,7 @@ export default function UsersPage({ authConfig, currentUserId, onOpenSidebar }) 
   const [users, setUsers] = useState(null);
   const [roles, setRoles] = useState([]);
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
   const local = authConfig.mode === "local";
 
   useEffect(() => {
@@ -226,22 +230,29 @@ export default function UsersPage({ authConfig, currentUserId, onOpenSidebar }) 
   return (
     <PageShell
       title="Utilizadores"
-      description={
+      subtitle={
         local
           ? "Quem entra na aplicação e o que cada pessoa pode fazer. Passa o rato por um papel para ver o que inclui."
           : authConfig.roles_from_token
             ? "Os utilizadores entram pelo sistema externo e os papéis vêm de lá. Aqui só se ativa ou desativa o acesso."
             : "Os utilizadores entram pelo sistema externo e aparecem aqui no primeiro acesso; os papéis atribuem-se aqui."
       }
+      meta={users && <span>{users.length} utilizador{users.length === 1 ? "" : "es"}</span>}
+      actions={
+        local &&
+        roles.length > 0 && (
+          <Button variant="primary" icon={UserPlus} onClick={() => setCreating(true)}>
+            Novo utilizador
+          </Button>
+        )
+      }
       onOpenSidebar={onOpenSidebar}
     >
-      {local && roles.length > 0 && (
-        <NewUserForm roles={roles} onCreated={(user) => setUsers((prev) => [...prev, user])} />
-      )}
-      {error && <p className="text-sm text-red-700 dark:text-red-300">{error}</p>}
-      {!users && !error && <Loader2 className="size-5 animate-spin text-stone-400" />}
-      {users && (
-        <ul className="divide-y divide-stone-200 dark:divide-stone-800">
+      <ErrorText>{error}</ErrorText>
+      {!users && !error && <Spinner label="A carregar…" />}
+      {users && users.length === 0 && <EmptyState icon={Users} title="Ainda não há utilizadores" />}
+      {users && users.length > 0 && (
+        <ul className="divide-y divide-stone-200 rounded-xl border border-stone-200 bg-white dark:divide-stone-800 dark:border-stone-800 dark:bg-stone-900">
           {users.map((user) => (
             <UserRow
               key={user.user_id}
@@ -255,6 +266,7 @@ export default function UsersPage({ authConfig, currentUserId, onOpenSidebar }) 
           ))}
         </ul>
       )}
+      {creating && <NewUserModal roles={roles} onCreated={(user) => setUsers((prev) => [...(prev || []), user])} onClose={() => setCreating(false)} />}
     </PageShell>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, PlugZap, Save } from "lucide-react";
 import { getLlmSettings, saveLlmProvider, testLlmProvider } from "../api";
-import { Button, ErrorText, inputClass, Spinner } from "./ui";
+import { Button, ErrorText, Field, inputClass, Spinner } from "./ui";
 
 function draftFrom(provider) {
   return {
@@ -10,18 +10,6 @@ function draftFrom(provider) {
     chat_model: provider.chat_model,
     utility_model: provider.utility_model,
   };
-}
-
-function Field({ id, label, help, children }) {
-  return (
-    <div className="space-y-1">
-      <label htmlFor={id} className="text-sm font-medium text-stone-800 dark:text-stone-200">
-        {label}
-      </label>
-      {children}
-      {help && <p className="text-xs text-stone-500 dark:text-stone-400">{help}</p>}
-    </div>
-  );
 }
 
 // Configurações → Modelo de linguagem: fornecedor de LLM, chave de API e modelos usados em toda a aplicação.
@@ -94,7 +82,7 @@ export default function LlmProviderSettings({ onSaved }) {
   return (
     <section className="mb-8">
       <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-500 dark:text-stone-400">Modelo de linguagem</h2>
-      <div className="space-y-4 rounded-xl border border-stone-200 p-4 dark:border-stone-800">
+      <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         {!state && !error && <Spinner label="A carregar…" />}
 
         {state && provider && draft && (
@@ -104,7 +92,7 @@ export default function LlmProviderSettings({ onSaved }) {
               {state.source === "env" && " Por agora vale a configuração do ficheiro .env; ao guardar aqui, passa a valer esta."}
             </p>
 
-            <Field id="llm-provider" label="Fornecedor" help={provider.hint}>
+            <Field label="Fornecedor" hint={provider.hint}>
               <select id="llm-provider" value={selected} disabled={busy} onChange={(e) => select(state, e.target.value)} className={inputClass}>
                 {state.providers.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -115,7 +103,7 @@ export default function LlmProviderSettings({ onSaved }) {
               </select>
             </Field>
 
-            <Field id="llm-key" label={provider.needs_key ? "Chave de API" : "Chave de API (opcional)"}>
+            <Field label={provider.needs_key ? "Chave de API" : "Chave de API (opcional)"}>
               <input
                 id="llm-key"
                 type="password"
@@ -128,7 +116,7 @@ export default function LlmProviderSettings({ onSaved }) {
               />
             </Field>
 
-            <Field id="llm-url" label="URL da API" help={provider.default_base_url && `Vazio usa ${provider.default_base_url}`}>
+            <Field label="URL da API" hint={provider.default_base_url && `Vazio usa ${provider.default_base_url}`}>
               <input
                 id="llm-url"
                 value={draft.base_url}
@@ -140,7 +128,7 @@ export default function LlmProviderSettings({ onSaved }) {
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field id="llm-chat" label="Modelo de chat" help="Responde às perguntas e conduz o agente.">
+              <Field label="Modelo de chat" hint="Responde às perguntas e conduz o agente.">
                 <input
                   id="llm-chat"
                   value={draft.chat_model}
@@ -150,11 +138,7 @@ export default function LlmProviderSettings({ onSaved }) {
                   className={inputClass}
                 />
               </Field>
-              <Field
-                id="llm-utility"
-                label="Modelo utilitário"
-                help="Mais pequeno e barato: filtro de âmbito, ficha e pesquisa. Vazio usa o de chat."
-              >
+              <Field label="Modelo utilitário" hint="Mais pequeno e barato: filtro de âmbito, ficha e pesquisa. Vazio usa o de chat.">
                 <input
                   id="llm-utility"
                   value={draft.utility_model}
