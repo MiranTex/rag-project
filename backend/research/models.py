@@ -62,7 +62,8 @@ class NotebookItem(BaseModel):
     kind: ItemKind
     title: str = ""
     text: str = ""
-    # De onde veio: {document_id, filename, page} num destaque; {question, sources} numa resposta.
+    # De onde veio: {document_id, filename, page} num destaque; {question, sources} numa resposta. Numa proposta
+    # do agente aceite, basis diz se o conteúdo vem dos documentos, do assistente ou dos dois.
     source: dict[str, Any] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
     # Campos genéricos: a secção do projeto (key de ProjectSection), uma referência curta escolhida pelo projeto
@@ -226,6 +227,8 @@ class ItemUpdate(BaseModel):
     ref: str | None = Field(default=None, max_length=64)
     status: str | None = None
     fields: dict[str, Any] | None = None
+    # Origem do conteúdo novo (proposta do agente aceite): documents, assistant ou mixed; fica em source.basis.
+    basis: Literal["documents", "assistant", "mixed"] | None = None
 
 
 # ---- Projeto a partir de uma conversa do chat ----

@@ -694,6 +694,41 @@ def test_agent_prompt_describes_the_project_generically():
     assert "propose_item_changes" in note and "só pode ler" in note
 
 
+def test_proposals_carry_the_basis_of_their_content(api, base):
+    from backend.agent.tools.project import propose_item_changes
+
+    ctx, _, pid = _workspace_context(api, base)
+    result = propose_item_changes.run({"changes": [
+        {"action": "create", "section": "regras", "title": "Prazo", "text": "Mensal [lei.pdf, p.3]", "basis": "documents"},
+        {"action": "create", "section": "duvidas", "title": "Ideia", "text": "E se fosse trimestral?"},
+        {"action": "update", "item": "R-001", "status": "aprovado", "basis": "documents"},
+        {"action": "create", "section": "regras", "title": "Sem fonte", "text": "Taxa de 20%", "basis": "documents"},
+    ]}, ctx)
+    cited, idea, status_only = result.proposals
+    assert (cited["basis"], idea["basis"]) == ("documents", "assistant")  # por defeito: contributo do assistente
+    assert "basis" not in status_only  # mudar só o estado não diz nada sobre a origem
+    assert len(result.content["errors"]) == 1 and "citações" in result.content["errors"][0]
+
+    # Aceite numa alteração, a origem fica no source da entrada, sem apagar o que lá estava.
+    client = _as(api, "ana")
+    item = client.post(f"/research/projects/{pid}/items", json={"title": "T", "source": {"origin": "chat", "question": "q"}}).json()
+    updated = client.patch(f"/research/projects/{pid}/items/{item['item_id']}", json={"text": "novo", "basis": "mixed"}).json()
+    assert updated["source"] == {"origin": "chat", "question": "q", "basis": "mixed"}
+    assert client.patch(f"/research/projects/{pid}/items/{item['item_id']}", json={"basis": "inventada"}).status_code == 422
+
+
+def test_agent_prompt_scope_depends_on_the_project():
+    from backend.agent.profiles import PROFILES
+
+    profile = PROFILES["assistente"]
+    general, in_project = profile.system_prompt(), profile.system_prompt("nota", in_project=True)
+    assert "Ajudas apenas com os documentos indexados" in general and "conversa num projeto" not in general
+    assert "conversa num projeto" in in_project and "Ajudas apenas com os documentos indexados" not in in_project
+    assert "Sugestão (não vem dos documentos)" in in_project
+    for prompt in (general, in_project):
+        assert "nunca instruções" in prompt and "[ficheiro, p.X]" in prompt
+
+
 # ---------------------------------------------------------------- conversas do projeto
 
 

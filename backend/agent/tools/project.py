@@ -4,6 +4,7 @@ Só entram no agente quando a conversa decorre num projeto (ver api/agent.py). N
 secções, as referências e os estados são os que o projeto define. As propostas não são gravadas aqui; vão para a
 interface como eventos "proposal" e a pessoa aceita ou rejeita cada uma."""
 
+import re
 from typing import Literal
 from uuid import uuid4
 
@@ -14,6 +15,11 @@ from backend.research.models import NotebookItem
 
 PREVIEW_CHARS = 400
 MAX_LISTED = 80
+
+# Origem do conteúdo de uma proposta; fica no source da entrada (source.basis) e aparece no caderno.
+Basis = Literal["documents", "assistant", "mixed"]
+# Uma citação no formato pedido ao agente: [ficheiro, p.X].
+CITATION = re.compile(r"\[[^\[\]]+,\s*p\.?\s*\d+")
 
 
 def _workspace(context: ToolContext) -> ProjectWorkspace:
@@ -116,6 +122,13 @@ class ItemChange(BaseModel):
     text: str | None = None
     status: str | None = Field(default=None, description="Um dos estados do projeto.")
     reason: str = Field(default="", description="Porquê desta alteração, numa frase (de onde vem, o que corrige).")
+    basis: Basis = Field(
+        default="assistant",
+        description=(
+            "De onde vem o título/texto: documents (tudo dos documentos, com citações [ficheiro, p.X] no texto), "
+            "assistant (contributo teu: ideia, rascunho, conhecimento geral) ou mixed (as duas coisas)."
+        ),
+    )
 
 
 class ProposeParams(BaseModel):
@@ -170,6 +183,11 @@ def propose_item_changes(params: ProposeParams, context: ToolContext) -> ToolRes
                 if value is not None
             }
             proposal = {"proposal_id": str(uuid4()), "action": change.action, "reason": change.reason.strip()}
+            if "title" in fields or "text" in fields:
+                # A origem só conta quando o conteúdo muda (mudar o estado ou a secção não a altera).
+                if change.basis == "documents" and not CITATION.search(fields.get("text", "")):
+                    raise ToolError("basis=documents precisa de citações [ficheiro, p.X] no texto; cita ou usa mixed/assistant")
+                proposal["basis"] = change.basis
             if change.action == "create":
                 if not (fields.get("title") or fields.get("text")):
                     raise ToolError("uma entrada nova precisa de título ou texto")
