@@ -56,13 +56,15 @@ def project_document_ids(project_id: str) -> list[str]:
     return ids
 
 
-def project_scope(project_id: str | None, user: AuthenticatedUser) -> list[str] | None:
-    """Documentos a que uma pesquisa fica limitada: os do projeto, ou None (toda a base) sem projeto."""
+def project_scope(project_id: str | None, user: AuthenticatedUser, allow_empty: bool = False) -> list[str] | None:
+    """Documentos a que uma pesquisa fica limitada: os do projeto, ou None (toda a base) sem projeto. Com
+    `allow_empty` (o agente, que também trabalha com o caderno), um projeto sem documentos dá uma lista vazia, e
+    as pesquisas não encontram nada em vez de falhar."""
     if not project_id:
         return None
     load_project(project_id, user)
     ids = project_document_ids(project_id)
-    if not ids:
+    if not ids and not allow_empty:
         raise HTTPException(status_code=400, detail="O projeto ainda não tem documentos fixados.")
     return ids
 

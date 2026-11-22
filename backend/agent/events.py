@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-AgentEventType = Literal["thinking", "tool_call", "tool_result", "export", "sources", "answer"]
+AgentEventType = Literal["thinking", "tool_call", "tool_result", "export", "proposal", "sources", "answer"]
 
 
 @dataclass

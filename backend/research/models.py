@@ -13,6 +13,21 @@ ItemKind = Literal["note", "excerpt", "answer", "draft"]
 CitationStyle = Literal["apa", "iso690", "bibtex"]
 
 
+class ProjectSection(BaseModel):
+    """Uma parte do projeto (ex.: "Requisitos funcionais", "Riscos", "Capítulo 2"). O código não conhece nenhum
+    assunto: as secções são dados de cada projeto, propostos pelo LLM a partir da conversa ou escritos à mão."""
+
+    key: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=200)
+    description: str = ""
+
+
+class ProjectStructure(BaseModel):
+    sections: list[ProjectSection] = Field(default_factory=list, max_length=30)
+    # Estados possíveis de uma entrada (ex.: proposto, aprovado). Vazio: as entradas não têm estado.
+    statuses: list[str] = Field(default_factory=list, max_length=12)
+
+
 class Project(BaseModel):
     project_id: str
     owner_id: str
@@ -22,6 +37,8 @@ class Project(BaseModel):
     description: str = ""
     # Tipo de trabalho a escrever (chave de document_types.json), para o esqueleto.
     work_type: str = ""
+    # Secções e estados definidos pelo próprio projeto (ver ProjectStructure).
+    structure: ProjectStructure = Field(default_factory=ProjectStructure)
     created_at: str
     updated_at: str
 
@@ -48,9 +65,43 @@ class NotebookItem(BaseModel):
     # De onde veio: {document_id, filename, page} num destaque; {question, sources} numa resposta.
     source: dict[str, Any] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
+    # Campos genéricos: a secção do projeto (key de ProjectSection), uma referência curta escolhida pelo projeto
+    # (RF-001, Art. 3, Q-7…), um dos estados do projeto e atributos livres (prioridade, responsável…).
+    section: str = ""
+    ref: str = ""
+    status: str = ""
+    fields: dict[str, Any] = Field(default_factory=dict)
     created_by: str
     created_at: str
     updated_at: str
+
+
+class ProjectConversation(BaseModel):
+    """Conversa do chat guardada no projeto, visível aos membros. As mensagens são as da interface (pergunta,
+    resposta, fontes, passos do agente, propostas e a decisão sobre cada uma)."""
+
+    conversation_id: str
+    project_id: str
+    title: str
+    created_by: str
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class ProjectInvitation(BaseModel):
+    """Convite por email para um projeto. Guarda-se só o hash do token; o link é mostrado uma vez a quem convida."""
+
+    invitation_id: str
+    project_id: str
+    email: str
+    role: MemberRole
+    token_hash: str
+    invited_by: str
+    created_at: str
+    expires_at: str
+    accepted_by: str | None = None
+    accepted_at: str | None = None
 
 
 class Comment(BaseModel):
@@ -103,6 +154,7 @@ class ProjectCreate(BaseModel):
     question: str = ""
     description: str = ""
     work_type: str = ""
+    structure: ProjectStructure = Field(default_factory=ProjectStructure)
 
 
 class ProjectUpdate(BaseModel):
@@ -110,6 +162,7 @@ class ProjectUpdate(BaseModel):
     question: str | None = None
     description: str | None = None
     work_type: str | None = None
+    structure: ProjectStructure | None = None
 
 
 class MemberInfo(BaseModel):
@@ -159,12 +212,84 @@ class ItemCreate(BaseModel):
     text: str = ""
     source: dict[str, Any] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
+    section: str = ""
+    ref: str = Field(default="", max_length=64)
+    status: str = ""
+    fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class ItemUpdate(BaseModel):
     title: str | None = None
     text: str | None = None
     tags: list[str] | None = None
+    section: str | None = None
+    ref: str | None = Field(default=None, max_length=64)
+    status: str | None = None
+    fields: dict[str, Any] | None = None
+
+
+# ---- Projeto a partir de uma conversa do chat ----
+
+
+class ConversationSource(BaseModel):
+    document_id: str = ""
+    filename: str = ""
+    page: int | None = None
+    text: str = ""
+
+
+class ConversationTurn(BaseModel):
+    question: str = ""
+    answer: str = ""
+    sources: list[ConversationSource] = Field(default_factory=list)
+
+
+class ConversationDraftRequest(BaseModel):
+    turns: list[ConversationTurn] = Field(min_length=1, max_length=60)
+    # Indicação opcional da pessoa sobre o que quer do projeto ("especificação para um software", "parecer"…).
+    goal: str = Field(default="", max_length=1000)
+
+
+class DraftItem(BaseModel):
+    section: str = ""
+    ref: str = Field(default="", max_length=64)
+    title: str = ""
+    text: str = ""
+    status: str = ""
+    fields: dict[str, Any] = Field(default_factory=dict)
+    # Páginas dos documentos em que a entrada se apoia: [{document_id, filename, page}].
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProjectDraft(BaseModel):
+    """Proposta de projeto para a pessoa rever antes de criar; `generated` é False quando o LLM não respondeu e
+    a proposta é só a conversa arrumada numa secção."""
+
+    title: str
+    description: str = ""
+    question: str = ""
+    structure: ProjectStructure = Field(default_factory=ProjectStructure)
+    items: list[DraftItem] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list)
+    generated: bool = True
+
+
+class ProjectFromDraft(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    question: str = ""
+    structure: ProjectStructure = Field(default_factory=ProjectStructure)
+    items: list[DraftItem] = Field(default_factory=list, max_length=300)
+    document_ids: list[str] = Field(default_factory=list, max_length=100)
+    # A conversa original fica no caderno como respostas guardadas (com as fontes).
+    conversation: list[ConversationTurn] = Field(default_factory=list, max_length=60)
+    members: list[MemberAdd] = Field(default_factory=list, max_length=50)
+
+
+class ProjectFromDraftResult(BaseModel):
+    detail: ProjectDetail
+    # O que não foi possível fazer (utilizador desconhecido, documento já não indexado…), para mostrar à pessoa.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ItemView(NotebookItem):
@@ -257,3 +382,61 @@ class FeedbackCreate(BaseModel):
     mode: str = "agent"
     sources: list[dict[str, Any]] = Field(default_factory=list)
     project_id: str | None = None
+
+
+class ConversationSummary(BaseModel):
+    conversation_id: str
+    project_id: str
+    title: str
+    created_by: str
+    author: str = ""
+    message_count: int = 0
+    pending_proposals: int = 0
+    created_at: str
+    updated_at: str
+
+
+class ConversationView(ConversationSummary):
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    can_edit: bool = False
+
+
+class ConversationSave(BaseModel):
+    title: str = Field(default="", max_length=200)
+    messages: list[dict[str, Any]] = Field(min_length=1, max_length=200)
+
+
+class InvitationCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    role: MemberRole = "viewer"
+
+
+class InvitationView(BaseModel):
+    invitation_id: str
+    email: str
+    role: MemberRole
+    invited_by: str = ""
+    created_at: str
+    expires_at: str
+
+
+class InvitationCreated(InvitationView):
+    # Só nesta resposta: quem convida copia o link e envia-o.
+    token: str
+
+
+class InvitationInfo(BaseModel):
+    """O que a página pública do convite mostra (sem login)."""
+
+    project_title: str
+    invited_by: str
+    email: str
+    role: MemberRole
+    status: Literal["pending", "accepted", "expired"]
+    signup_allowed: bool
+
+
+class InvitationSignup(BaseModel):
+    username: str = Field(min_length=2, max_length=255)
+    display_name: str = Field(default="", max_length=255)
+    password: str = Field(min_length=8)

@@ -25,6 +25,8 @@ from backend.research.models import (
     Comment,
     NotebookItem,
     Project,
+    ProjectConversation,
+    ProjectInvitation,
     ProjectDocument,
     ProjectMember,
     SavedSearch,
@@ -39,6 +41,7 @@ projects = Table(
     Column("question", Text, nullable=False, default=""),
     Column("description", Text, nullable=False, default=""),
     Column("work_type", String(64), nullable=False, default=""),
+    Column("structure", JSON, nullable=False, default=dict),
     Column("created_at", String(40), nullable=False),
     Column("updated_at", String(40), nullable=False),
 )
@@ -70,6 +73,10 @@ notebook_items = Table(
     Column("text", Text, nullable=False, default=""),
     Column("source", JSON, nullable=False),
     Column("tags", JSON, nullable=False),
+    Column("section", String(64), nullable=False, default=""),
+    Column("ref", String(64), nullable=False, default=""),
+    Column("status", String(64), nullable=False, default=""),
+    Column("fields", JSON, nullable=False, default=dict),
     Column("created_by", String(64), nullable=False),
     Column("created_at", String(40), nullable=False),
     Column("updated_at", String(40), nullable=False),
@@ -121,8 +128,43 @@ answer_feedback = Table(
     Column("created_at", String(40), nullable=False),
 )
 
+project_conversations = Table(
+    "project_conversations",
+    metadata_obj,
+    Column("conversation_id", String(64), primary_key=True),
+    Column("project_id", String(64), nullable=False, index=True),
+    Column("title", String(200), nullable=False),
+    Column("created_by", String(64), nullable=False),
+    Column("messages", JSON, nullable=False),
+    Column("created_at", String(40), nullable=False),
+    Column("updated_at", String(40), nullable=False),
+)
+
+project_invitations = Table(
+    "project_invitations",
+    metadata_obj,
+    Column("invitation_id", String(64), primary_key=True),
+    Column("project_id", String(64), nullable=False, index=True),
+    Column("email", String(320), nullable=False),
+    Column("role", String(16), nullable=False),
+    Column("token_hash", String(64), nullable=False, unique=True),
+    Column("invited_by", String(64), nullable=False),
+    Column("created_at", String(40), nullable=False),
+    Column("expires_at", String(40), nullable=False),
+    Column("accepted_by", String(64), nullable=True),
+    Column("accepted_at", String(40), nullable=True),
+)
+
 # Ao apagar um projeto, sai tudo o que lhe pertence.
-_PROJECT_CHILDREN = (project_members, project_documents, notebook_items, project_comments, project_matrices)
+_PROJECT_CHILDREN = (
+    project_members,
+    project_documents,
+    notebook_items,
+    project_comments,
+    project_matrices,
+    project_conversations,
+    project_invitations,
+)
 
 
 def _upsert(conn, table: Table, key: dict[str, Any], values: dict[str, Any]) -> None:
@@ -147,7 +189,7 @@ class SqlResearchRepository:
     # ---- Projetos ----
 
     def save_project(self, project: Project) -> None:
-        values = project.model_dump()
+        values = project.model_dump(mode="json")
         with self.engine.begin() as conn:
             _upsert(conn, projects, {"project_id": values.pop("project_id")}, values)
 
@@ -265,6 +307,51 @@ class SqlResearchRepository:
     def save_matrix(self, project_id: str, data: dict[str, Any], updated_at: str) -> None:
         with self.engine.begin() as conn:
             _upsert(conn, project_matrices, {"project_id": project_id}, {"data": data, "updated_at": updated_at})
+
+    # ---- Conversas do projeto ----
+
+    def save_conversation(self, conversation: ProjectConversation) -> None:
+        values = conversation.model_dump(mode="json")
+        with self.engine.begin() as conn:
+            _upsert(conn, project_conversations, {"conversation_id": values.pop("conversation_id")}, values)
+
+    def get_conversation(self, conversation_id: str) -> ProjectConversation | None:
+        return self._one(project_conversations, project_conversations.c.conversation_id == conversation_id, ProjectConversation)
+
+    def list_conversations(self, project_id: str) -> list[ProjectConversation]:
+        """As alteradas mais recentemente primeiro."""
+        statement = (
+            select(project_conversations)
+            .where(project_conversations.c.project_id == project_id)
+            .order_by(project_conversations.c.updated_at.desc())
+        )
+        return self._all(statement, ProjectConversation)
+
+    def delete_conversation(self, conversation_id: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(delete(project_conversations).where(project_conversations.c.conversation_id == conversation_id))
+
+    # ---- Convites ----
+
+    def save_invitation(self, invitation: ProjectInvitation) -> None:
+        values = invitation.model_dump()
+        with self.engine.begin() as conn:
+            _upsert(conn, project_invitations, {"invitation_id": values.pop("invitation_id")}, values)
+
+    def get_invitation_by_token_hash(self, token_hash: str) -> ProjectInvitation | None:
+        return self._one(project_invitations, project_invitations.c.token_hash == token_hash, ProjectInvitation)
+
+    def list_invitations(self, project_id: str) -> list[ProjectInvitation]:
+        statement = (
+            select(project_invitations)
+            .where(project_invitations.c.project_id == project_id)
+            .order_by(project_invitations.c.created_at.desc())
+        )
+        return self._all(statement, ProjectInvitation)
+
+    def delete_invitation(self, invitation_id: str) -> bool:
+        with self.engine.begin() as conn:
+            return conn.execute(delete(project_invitations).where(project_invitations.c.invitation_id == invitation_id)).rowcount > 0
 
     # ---- Pesquisas guardadas ----
 

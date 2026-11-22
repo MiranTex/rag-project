@@ -11,7 +11,7 @@ import backend.api.research as research_api
 import backend.api.research_projects as projects_api
 import backend.research.access as access
 import backend.research.discovery as discovery
-from backend.agent.tools.base import ToolContext
+from backend.agent.tools.base import ToolContext, ToolError
 from backend.api.security import current_user
 from backend.auth.authenticators import create_local_user
 from backend.auth.permissions import AuthenticatedUser
@@ -550,3 +550,257 @@ def test_draft_upload_is_analysed_without_being_stored(api):
     assert res.json()["overlap"][0]["document_id"] == "rec1"
     assert api["client"].post("/research/text-analysis", files={"file": ("x.exe", b"MZ" * 40, "application/octet-stream")}).status_code == 400
     assert api["client"].post("/research/text-analysis", data={"text": "curto"}).status_code == 422
+
+
+# ---------------------------------------------------------------- projeto a partir de uma conversa
+
+
+CONVERSATION = [
+    {"question": "Que regras há sobre o IVA?", "answer": "A taxa normal é 15% (p. 2).",
+     "sources": [{"document_id": "rec1", "filename": "rec1.pdf", "page": 2, "text": "taxa"}]},
+    {"question": "E prazos?", "answer": "A declaração é mensal.",
+     "sources": [{"document_id": "rec2", "filename": "rec2.pdf", "page": 2}, {"document_id": "draft", "filename": "draft.pdf", "page": 1}]},
+]
+
+
+def test_conversation_draft_follows_whatever_structure_the_llm_proposes(api):
+    api["llm"].answers["propose_project"] = {
+        "title": "Plano X",
+        "objective": "Organizar as regras",
+        "sections": [{"title": "Regras", "ref_prefix": "r"}, {"title": "Dúvidas", "ref_prefix": ""}, {"title": "regras"}],
+        "statuses": ["Proposto", "aprovado", "proposto"],
+        "items": [
+            {"section": "Regras", "title": "Taxa de IVA", "text": "15%", "sources": [1, 1, 99]},
+            {"section": "regras", "title": "Prazo", "text": "Mensal", "sources": [2]},
+            {"section": "Dúvidas", "title": "Isenções?", "text": "Por confirmar"},
+            {"section": "Inexistente", "title": "Solta", "text": "Vai para a primeira secção"},
+        ],
+    }
+    draft = _as(api, "ana").post("/research/projects/draft-from-conversation", json={"turns": CONVERSATION}).json()
+
+    assert draft["generated"] and draft["title"] == "Plano X" and draft["question"] == "Organizar as regras"
+    assert [s["key"] for s in draft["structure"]["sections"]] == ["regras", "duvidas"]
+    assert draft["structure"]["statuses"] == ["proposto", "aprovado"]
+    assert [(i["section"], i["ref"]) for i in draft["items"]] == [("regras", "R-001"), ("regras", "R-002"), ("duvidas", ""), ("regras", "R-003")]
+    assert draft["items"][0]["sources"] == [{"document_id": "rec1", "filename": "rec1.pdf", "page": 2}]
+    assert draft["items"][1]["sources"][0]["document_id"] == "rec2"
+    assert draft["document_ids"] == ["rec1", "rec2"]  # "draft" ainda não está indexado
+
+
+def test_conversation_draft_without_llm_keeps_the_conversation(api):
+    draft = _as(api, "ana").post("/research/projects/draft-from-conversation", json={"turns": CONVERSATION}).json()
+    assert not draft["generated"]
+    assert [i["title"] for i in draft["items"]] == ["Que regras há sobre o IVA?", "E prazos?"]
+    assert _as(api, "ana").post("/research/projects/draft-from-conversation", json={"turns": [{"question": " "}]}).status_code == 422
+
+
+def test_project_is_created_from_the_reviewed_draft(api):
+    structure = {"sections": [{"key": "regras", "title": "Regras", "description": ""}], "statuses": ["proposto", "aprovado"]}
+    payload = {
+        "title": "Plano X",
+        "question": "Organizar as regras",
+        "structure": structure,
+        "items": [
+            {"section": "regras", "ref": "R-001", "title": "Taxa", "text": "15%", "status": "proposto",
+             "sources": [{"document_id": "rec1", "filename": "rec1.pdf", "page": 2}]},
+            {"section": "regras", "ref": "R-002", "title": "Prazo", "text": "Mensal", "status": "proposto"},
+        ],
+        "document_ids": ["rec1", "draft"],
+        "conversation": CONVERSATION,
+        "members": [{"username": "rui", "role": "editor"}, {"username": "ninguem"}],
+    }
+    client = _as(api, "ana")
+    bad = {**payload, "items": [{"section": "outra", "title": "x"}]}
+    assert client.post("/research/projects/from-draft", json=bad).status_code == 422
+
+    result = client.post("/research/projects/from-draft", json=payload).json()
+    detail, pid = result["detail"], result["detail"]["project"]["project_id"]
+    assert detail["project"]["structure"] == structure
+    assert [d["document_id"] for d in detail["documents"]] == ["rec1"]
+    assert {m["username"]: m["role"] for m in detail["members"]} == {"ana": "owner", "rui": "editor"}
+    assert len(result["warnings"]) == 2
+
+    items = client.get(f"/research/projects/{pid}/items").json()
+    assert [(i["kind"], i["ref"]) for i in items] == [("note", "R-002"), ("note", "R-001"), ("answer", ""), ("answer", "")]
+    assert items[1]["source"]["sources"][0]["page"] == 2
+    assert [i["ref"] for i in client.get(f"/research/projects/{pid}/items", params={"section": "regras"}).json()] == ["R-002", "R-001"]
+
+    editor = _as(api, "rui")
+    item_id = items[0]["item_id"]
+    assert editor.patch(f"/research/projects/{pid}/items/{item_id}", json={"status": "aprovado"}).json()["status"] == "aprovado"
+    assert editor.patch(f"/research/projects/{pid}/items/{item_id}", json={"status": "fechado"}).status_code == 422
+    renamed = editor.patch(f"/research/projects/{pid}", json={"structure": {**structure, "statuses": ["proposto", "aprovado", "fechado"]}})
+    assert renamed.json()["project"]["structure"]["statuses"][-1] == "fechado"
+    assert editor.patch(f"/research/projects/{pid}/items/{item_id}", json={"status": "fechado"}).status_code == 200
+
+
+# ---------------------------------------------------------------- tools do caderno do projeto
+
+
+def _workspace_context(api, base, can_edit=True):
+    from backend.agent.tools.base import ProjectWorkspace
+
+    client = _as(api, "ana")
+    structure = {"sections": [{"key": "regras", "title": "Regras", "description": ""}, {"key": "duvidas", "title": "Dúvidas", "description": ""}],
+                 "statuses": ["proposto", "aprovado"]}
+    pid = client.post("/research/projects", json={"title": "P", "structure": structure}).json()["project"]["project_id"]
+    client.post(f"/research/projects/{pid}/items", json={"title": "Taxa", "text": "15%", "section": "regras", "ref": "R-001", "status": "proposto"})
+    client.post(f"/research/projects/{pid}/items", json={"title": "Isenções?", "section": "duvidas"})
+    repo = api["repo"]
+    workspace = ProjectWorkspace(project=repo.get_project(pid), repository=repo, can_edit=can_edit)
+    return ToolContext(**{**vars(base["ctx"]), "workspace": workspace}), repo, pid
+
+
+def test_project_tools_list_and_read_items(api, base):
+    from backend.agent.tools.project import get_project_item, list_project_items
+
+    ctx, _, _ = _workspace_context(api, base)
+    listed = list_project_items.run({}, ctx).content
+    assert [(i["ref"], i["section"]) for i in listed["items"]] == [("R-001", "Regras"), ("", "Dúvidas")]
+    assert list_project_items.run({"section": "dúvidas"}, ctx).content["total"] == 1
+    assert get_project_item.run({"item": "r-001"}, ctx).content["text"] == "15%"
+    with pytest.raises(ToolError):
+        get_project_item.run({"item": "R-999"}, ctx)
+    with pytest.raises(ToolError):
+        list_project_items.run({}, base["ctx"])  # fora de um projeto
+
+
+def test_proposals_are_validated_and_never_written(api, base):
+    from backend.agent.tools.project import propose_item_changes
+
+    ctx, repo, pid = _workspace_context(api, base)
+    result = propose_item_changes.run({"changes": [
+        {"action": "create", "section": "Regras", "ref": "R-002", "title": "Prazo", "text": "Mensal [lei.pdf, p.3]"},
+        {"action": "update", "item": "R-001", "status": "aprovado", "text": "15%", "reason": "confirmado"},
+        {"action": "update", "item": "R-001", "text": "15%"},
+        {"action": "create", "section": "Inexistente", "title": "x"},
+    ]}, ctx)
+    created, updated = result.proposals
+    assert created["changes"] == {"section": "regras", "ref": "R-002", "title": "Prazo", "text": "Mensal [lei.pdf, p.3]", "status": "proposto"}
+    assert updated["changes"] == {"status": "aprovado"} and updated["before"]["status"] == "proposto"
+    assert len(result.content["errors"]) == 2
+    assert repo.count_items(pid) == 2  # nada foi gravado
+    with pytest.raises(ToolError):
+        propose_item_changes.run({"changes": [{"action": "update", "item": "R-001", "status": "fechado"}]}, ctx)
+
+
+def test_agent_prompt_describes_the_project_generically():
+    from backend.api.agent import project_note
+
+    project = Project(project_id="p", owner_id="a", title="Plano", question="Organizar regras", created_at=NOW, updated_at=NOW,
+                      structure={"sections": [{"key": "regras", "title": "Regras"}], "statuses": ["proposto"]})
+    note = project_note(project, document_count=2, item_count=5, can_edit=False)
+    assert "Objetivo do projeto: Organizar regras" in note and "- regras: Regras" in note
+    assert "propose_item_changes" in note and "só pode ler" in note
+
+
+# ---------------------------------------------------------------- conversas do projeto
+
+
+def test_project_conversations_are_shared_with_members(api):
+    client = _as(api, "ana")
+    pid = client.post("/research/projects", json={"title": "P"}).json()["project"]["project_id"]
+    client.post(f"/research/projects/{pid}/members", json={"username": "rui", "role": "viewer"})
+    client.post(f"/research/projects/{pid}/members", json={"username": "eva", "role": "editor"})
+    messages = [{"id": 1, "question": "Que regras há?", "answer": "Várias.",
+                 "proposals": [{"proposal_id": "x", "action": "create", "changes": {"title": "R"}}, {"proposal_id": "y", "decision": "rejected"}]}]
+
+    created = client.post(f"/research/projects/{pid}/conversations", json={"messages": messages}).json()
+    cid = created["conversation_id"]
+    assert (created["title"], created["pending_proposals"], created["can_edit"]) == ("Que regras há?", 1, True)
+
+    viewer = _as(api, "rui")
+    listed = viewer.get(f"/research/projects/{pid}/conversations").json()
+    assert [(c["title"], c["author"], c["message_count"]) for c in listed] == [("Que regras há?", "ana", 1)]
+    assert viewer.get(f"/research/projects/{pid}/conversations/{cid}").json()["can_edit"] is False
+    assert viewer.put(f"/research/projects/{pid}/conversations/{cid}", json={"messages": messages}).status_code == 403
+    assert viewer.post(f"/research/projects/{pid}/conversations", json={"messages": messages}).status_code == 200
+
+    editor = _as(api, "eva")
+    messages[0]["proposals"][0]["decision"] = "accepted"
+    saved = editor.put(f"/research/projects/{pid}/conversations/{cid}", json={"messages": messages}).json()
+    assert saved["pending_proposals"] == 0
+    assert editor.delete(f"/research/projects/{pid}/conversations/{cid}").status_code == 403
+    assert _as(api, "ana").delete(f"/research/projects/{pid}/conversations/{cid}").status_code == 200
+
+    outsider = AuthenticatedUser.of(api["people"]["ana"].user.model_copy(update={"user_id": "outro"}))
+    api["people"]["outro"] = outsider
+    assert _as(api, "outro").get(f"/research/projects/{pid}/conversations").status_code == 404
+
+
+# ---------------------------------------------------------------- convites
+
+
+@pytest.fixture
+def invites(api, base, monkeypatch, tmp_path):
+    import backend.api.invitations as invitations_api
+    from backend.auth.authenticators import LocalAuthenticator
+
+    settings = Settings(_env_file=None, upload_dir=str(tmp_path / "uploads"), auth_secret_key="x" * 40)
+    users = SqlUserRepository(base["engine"])
+    authenticator = LocalAuthenticator(users, "x" * 40, 60)
+    for module in (invitations_api, projects_api):
+        for name, value in {"get_research_repository": lambda: api["repo"], "get_users": lambda: users,
+                            "get_settings": lambda: settings, "get_authenticator": lambda: authenticator}.items():
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, value)
+    api["client"].app.include_router(invitations_api.router)
+    api.update(settings=settings, authenticator=authenticator)
+    return api
+
+
+def test_invitation_by_email_adds_a_new_account_to_the_project(invites):
+    client = _as(invites, "ana")
+    pid = client.post("/research/projects", json={"title": "Plano"}).json()["project"]["project_id"]
+    assert client.post(f"/research/projects/{pid}/invitations", json={"email": "nao-e-email"}).status_code == 422
+    created = client.post(f"/research/projects/{pid}/invitations", json={"email": "Nova@Exemplo.pt", "role": "editor"}).json()
+    token = created["token"]
+    assert created["email"] == "nova@exemplo.pt"
+    assert [i["email"] for i in client.get(f"/research/projects/{pid}/invitations").json()] == ["nova@exemplo.pt"]
+    assert _as(invites, "rui").post(f"/research/projects/{pid}/invitations", json={"email": "a@b.pt"}).status_code == 404
+
+    info = client.get(f"/invitations/{token}").json()
+    assert (info["project_title"], info["invited_by"], info["status"], info["signup_allowed"]) == ("Plano", "ana", "pending", True)
+    assert client.get("/invitations/token-falso").status_code == 404
+
+    assert client.post(f"/invitations/{token}/signup", json={"username": "rui", "password": "palavra-passe"}).status_code == 409
+    signed = client.post(f"/invitations/{token}/signup", json={"username": "nova", "password": "palavra-passe"}).json()
+    assert signed["access_token"] and signed["user"]["user"]["roles"] == ["chat"]
+    members = {m["username"]: m["role"] for m in _as(invites, "ana").get(f"/research/projects/{pid}").json()["members"]}
+    assert members["nova"] == "editor"
+    assert client.post(f"/invitations/{token}/signup", json={"username": "outra", "password": "palavra-passe"}).status_code == 410
+    assert client.get(f"/research/projects/{pid}/invitations").json() == []
+
+
+def test_invitation_is_accepted_by_an_existing_account_once(invites):
+    client = _as(invites, "ana")
+    pid = client.post("/research/projects", json={"title": "Plano"}).json()["project"]["project_id"]
+    client.post(f"/research/projects/{pid}/members", json={"username": "rui", "role": "editor"})
+    token = client.post(f"/research/projects/{pid}/invitations", json={"email": "rui@x.pt", "role": "viewer"}).json()["token"]
+    other = client.post(f"/research/projects/{pid}/invitations", json={"email": "eva@x.pt"}).json()
+
+    assert _as(invites, "rui").post(f"/invitations/{token}/accept").json() == {"project_id": pid}
+    assert _as(invites, "rui").get(f"/research/projects/{pid}").json()["my_role"] == "editor"  # não baixa o papel
+    assert _as(invites, "eva").post(f"/invitations/{token}/accept").status_code == 410
+
+    client = _as(invites, "ana")
+    assert client.delete(f"/research/projects/{pid}/invitations/{other['invitation_id']}").status_code == 200
+    assert _as(invites, "eva").post(f"/invitations/{other['token']}/accept").status_code == 404
+
+    invites["settings"].invite_signup_enabled = False
+    client = _as(invites, "ana")
+    token = client.post(f"/research/projects/{pid}/invitations", json={"email": "z@x.pt"}).json()["token"]
+    assert client.get(f"/invitations/{token}").json()["signup_allowed"] is False
+    assert client.post(f"/invitations/{token}/signup", json={"username": "zz", "password": "palavra-passe"}).status_code == 403
+
+
+def test_agent_can_work_in_a_project_without_documents(api):
+    from backend.api.agent import project_note
+
+    client = _as(api, "ana")
+    pid = client.post("/research/projects", json={"title": "Sem docs"}).json()["project"]["project_id"]
+    assert access.project_scope(pid, api["user"], allow_empty=True) == []
+    with pytest.raises(Exception):
+        access.project_scope(pid, api["user"])  # a pesquisa normal continua a pedir documentos
+    project = api["repo"].get_project(pid)
+    assert "ainda não tem documentos" in project_note(project, document_count=0, item_count=0, can_edit=True)

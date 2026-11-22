@@ -5,7 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from backend.repositories.contracts import DocumentRepository, ExtractionRepository
+from backend.repositories.contracts import DocumentRepository, ExtractionRepository, ResearchRepository
+from backend.research.models import Project
 from backend.services.document_types import DocumentTypes
 from backend.services.export_store import ExportStore
 from backend.services.rag_pipeline import RagPipeline
@@ -14,6 +15,16 @@ from backend.services.vector_store import VectorStore
 
 class ToolError(Exception):
     """Erro esperado de uma tool; a mensagem é devolvida ao modelo para ele poder corrigir o pedido."""
+
+
+@dataclass
+class ProjectWorkspace:
+    """O projeto onde a conversa decorre: as tools de projeto leem o caderno e propõem alterações (nunca as
+    gravam: quem aplica é a pessoa, ao aceitar a proposta na interface)."""
+
+    project: Project
+    repository: ResearchRepository
+    can_edit: bool = False
 
 
 @dataclass
@@ -33,6 +44,7 @@ class ToolContext:
     embedding_model: str = ""
     # Âmbito de um projeto de pesquisa: as pesquisas das tools ficam limitadas a estes documentos.
     scope_document_ids: list[str] | None = None
+    workspace: ProjectWorkspace | None = None
 
 
 @dataclass
@@ -54,6 +66,8 @@ class ToolResult:
     summary: str  # linha curta para mostrar na interface
     sources: list[SourceRef] = field(default_factory=list)
     exports: list[ExportRef] = field(default_factory=list)
+    # Alterações propostas ao caderno do projeto, para a pessoa aceitar ou rejeitar.
+    proposals: list[dict] = field(default_factory=list)
 
 
 @dataclass

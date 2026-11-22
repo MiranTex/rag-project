@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     # Chave dos tokens locais (HS256). Vazia: gerada no arranque (as sessões caem a cada reinício).
     auth_secret_key: str = ""
     auth_token_minutes: int = 480
+    # Convites para projetos: quem recebe um link pode criar conta (só no login local) com estes papéis.
+    invite_signup_enabled: bool = True
+    invite_signup_roles: str = "chat"
+    invite_valid_days: int = 14
     # Administrador criado no arranque quando ainda não há utilizadores (modo local).
     auth_bootstrap_admin_username: str = ""
     auth_bootstrap_admin_password: str = ""

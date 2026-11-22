@@ -96,6 +96,8 @@ class AgentRunner:
                 sources.setdefault((ref.filename, ref.page), ref)
             for export in result.exports:
                 yield AgentEvent("export", {"name": export.name, "format": export.format})
+            for proposal in result.proposals:
+                yield AgentEvent("proposal", proposal)
         except ToolError as exc:
             content, summary = {"error": str(exc)}, str(exc)
         except Exception as exc:
