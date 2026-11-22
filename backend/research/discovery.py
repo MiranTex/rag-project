@@ -35,9 +35,9 @@ def _excerpt(source) -> dict:
 
 
 def _similar_documents(ctx: ToolContext, embedding: list[float], top_k: int, filters: SearchFilters) -> list[dict]:
-    """Documentos mais próximos de um vetor, com a semelhança de cosseno calculada aqui (o Chroma devolve
-    distâncias, cuja escala depende da configuração da coleção)."""
-    results = ctx.profile_store.query(embedding, top_k, where=filters.to_chroma_where())
+    """Documentos mais próximos de um vetor, com a semelhança de cosseno calculada aqui (o store devolve
+    um score derivado da distância L2², não a semelhança de cosseno)."""
+    results = ctx.profile_store.query(embedding, top_k, where=filters.to_where())
     ids = [item["metadata"]["document_id"] for item in results]
     vectors = ctx.profile_store.get_embeddings(ids) if ids else {}
     documents = []

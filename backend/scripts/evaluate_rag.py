@@ -214,7 +214,7 @@ def run_evaluation_suite(
         print("RAG pipeline initialized\n")
     except Exception as e:
         print(f"Failed to initialize RAG pipeline: {e}")
-        print("Make sure Chroma, LM Studio, and embeddings are available.")
+        print("Make sure PostgreSQL (pgvector), the LLM, and embeddings are available.")
         return
 
     target_document_id = resolve_document_id(

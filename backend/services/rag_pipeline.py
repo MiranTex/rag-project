@@ -181,7 +181,7 @@ class RagPipeline:
             results = self.vector_store.query(
                 query_embedding=query_embedding,
                 top_k=vector_limit,
-                where=filters.to_chroma_where(),
+                where=filters.to_where(),
             )
             for item in results:
                 meta = item["metadata"]
@@ -366,7 +366,7 @@ class RagPipeline:
                 results = self.vector_store.query(
                     query_embedding=q_embedding,
                     top_k=vector_limit,
-                    where=filters.to_chroma_where(),
+                    where=filters.to_where(),
                 )
                 for item in results:
                     meta = item["metadata"]

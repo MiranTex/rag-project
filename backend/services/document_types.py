@@ -96,7 +96,7 @@ def parse_document_types(config: dict) -> DocumentTypes:
             kind = f.get("type", "text")
             if kind not in ("text", "list", "people"):
                 raise ValueError(f"tipo {key!r}: campo {f['key']!r} com type inválido {kind!r}")
-            # Só valores escalares vão para os metadados do Chroma.
+            # Só valores escalares vão para os metadados dos vetores.
             fields.append(FieldDef(f["key"], f.get("label", f["key"]), kind, f.get("hint", ""), bool(f.get("filterable")) and kind == "text"))
         sections = [_section(s) for s in raw.get("sections", [])]
         if any(s.key in BUILTIN_LABELS for s in sections):

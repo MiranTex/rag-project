@@ -178,12 +178,19 @@ def test_database_url_is_normalised(url, expected):
     assert config.Settings(_env_file=None, database_url=url).database_url == expected
 
 
-def test_vector_store_defaults_to_pgvector_only_on_postgres():
-    postgres = "postgres://u:p@db/app"
-    assert config.Settings(_env_file=None, database_url="sqlite:///x.db").vector_backend() == "chroma"
-    assert config.Settings(_env_file=None, database_url=postgres).vector_backend() == "pgvector"
-    assert config.Settings(_env_file=None, database_url=postgres, vector_store="chroma").vector_backend() == "chroma"
-    with pytest.raises(ValueError):
-        config.Settings(_env_file=None, database_url="sqlite:///x.db", vector_store="pgvector").vector_backend()
-    with pytest.raises(ValueError):
-        config.Settings(_env_file=None, vector_store="faiss").vector_backend()
+def test_vector_collection_accepts_the_old_chroma_name(monkeypatch):
+    monkeypatch.delenv("VECTOR_COLLECTION", raising=False)
+    monkeypatch.delenv("CHROMA_COLLECTION", raising=False)
+    assert config.Settings(_env_file=None).vector_collection == "rag_documents"
+    monkeypatch.setenv("CHROMA_COLLECTION", "antiga")
+    assert config.Settings(_env_file=None).vector_collection == "antiga"
+    monkeypatch.setenv("VECTOR_COLLECTION", "nova")
+    assert config.Settings(_env_file=None).vector_collection == "nova"
+
+
+def test_vector_store_requires_postgres(monkeypatch):
+    from backend import dependencies
+
+    monkeypatch.setattr(dependencies, "get_settings", lambda: config.Settings(_env_file=None, database_url="sqlite:///x.db"))
+    with pytest.raises(RuntimeError, match="PostgreSQL"):
+        dependencies.build_vector_store("rag_documents")

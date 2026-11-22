@@ -1,5 +1,6 @@
 """Vetores no PostgreSQL (pgvector): extensão vector e tabela vector_embeddings. Só em PostgreSQL e só se a
-extensão estiver disponível no servidor; nos outros casos não faz nada (os vetores ficam no Chroma).
+extensão estiver disponível no servidor; nos outros casos não faz nada (SQLite dos testes, ou extensão
+instalada mais tarde: o VectorStore cria a tabela ao arrancar).
 
 Revision ID: 0008
 Revises: 0007
@@ -13,7 +14,7 @@ down_revision = "0007"
 branch_labels = None
 depends_on = None
 
-# Igual a backend/services/pgvector_store.py (SCHEMA_STATEMENTS), copiado para a migração não mudar com o código.
+# Igual a backend/services/vector_store.py (SCHEMA_STATEMENTS), copiado para a migração não mudar com o código.
 STATEMENTS = (
     "CREATE EXTENSION IF NOT EXISTS vector",
     """CREATE TABLE IF NOT EXISTS vector_embeddings (

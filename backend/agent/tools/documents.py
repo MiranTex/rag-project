@@ -320,7 +320,7 @@ def find_similar_documents(params: FindSimilarParams, ctx: ToolContext) -> ToolR
 
     filters = _build_filters(ctx, params)
     extra = 1 if params.document_id else 0
-    results = ctx.profile_store.query(embedding, params.top_k + extra, where=filters.to_chroma_where())
+    results = ctx.profile_store.query(embedding, params.top_k + extra, where=filters.to_where())
     documents = []
     for item in results:
         meta = item["metadata"]

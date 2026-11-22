@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -24,12 +24,9 @@ class Settings(BaseSettings):
     open_router_chat_model: str = "anthropic/claude-sonnet-5.5"
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
-    chroma_host: str = "127.0.0.1"
-    chroma_port: int = 8001
-    chroma_collection: str = "rag_documents"
-    # Onde ficam os vetores: chroma (servidor Chroma) ou pgvector (tabela na base de dados PostgreSQL).
-    # Vazio: pgvector quando DATABASE_URL é PostgreSQL, chroma nos outros casos (ex.: SQLite no docker-compose).
-    vector_store: str = ""
+    # Vetores na tabela vector_embeddings do PostgreSQL (pgvector); coleções <nome> e <nome>_profiles.
+    # Aceita o nome antigo CHROMA_COLLECTION para não mudar as coleções de instalações existentes.
+    vector_collection: str = Field("rag_documents", validation_alias=AliasChoices("vector_collection", "chroma_collection"))
 
     top_k: int = 4
     retrieval_mode_default: str = "hybrid"
@@ -40,7 +37,8 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 150
     upload_dir: str = "data/uploads"
-    # Base de dados (registo, extrações, fila de trabalhos): sqlite:///… ou postgresql+psycopg://…
+    # Base de dados (registo, extrações, fila de trabalhos e vetores): postgresql+psycopg://… com a extensão
+    # pgvector. O SQLite só serve para os testes, que não precisam de vetores.
     # Aceita também postgres://… e postgresql://… (o formato dos addons), convertidos para postgresql+psycopg://.
     database_url: str = "sqlite:///backend/storage/rag.db"
     # Workers da fila de extração/indexação dentro da API; 0 se correrem noutro processo (python -m backend.worker).
@@ -132,14 +130,6 @@ class Settings(BaseSettings):
     def uses_postgres(self) -> bool:
         return self.database_url.startswith("postgresql")
 
-    def vector_backend(self) -> str:
-        backend = (self.vector_store or ("pgvector" if self.uses_postgres() else "chroma")).strip().lower()
-        if backend not in ("chroma", "pgvector"):
-            raise ValueError(f"VECTOR_STORE desconhecido: {self.vector_store!r} (chroma ou pgvector)")
-        if backend == "pgvector" and not self.uses_postgres():
-            raise ValueError("VECTOR_STORE=pgvector precisa de DATABASE_URL em PostgreSQL")
-        return backend
-
     def parse_rerank_weights(self, profile: str = "default") -> dict[str, float]:
         raw = self.rerank_weights_default if profile == "default" else self.rerank_weights_grounding
         parsed = json.loads(raw)
@@ -158,7 +148,7 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_env_settings() -> Settings:
-    """Só o .env (e variáveis de ambiente): a infraestrutura (base de dados, Chroma, pastas) vem daqui."""
+    """Só o .env (e variáveis de ambiente): a infraestrutura (base de dados, pastas) vem daqui."""
     settings = Settings()
     if not settings.storage_endpoint:
         Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)

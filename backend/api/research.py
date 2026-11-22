@@ -221,7 +221,7 @@ def new_for_search(search_id: str, user: AuthenticatedUser = Depends(can_researc
         return []
     ctx = research_context(user)
     ranked = ctx.profile_store.query(
-        embed_query(ctx.embedding_model, search.query), len(ids), where=SearchFilters(document_ids=ids).to_chroma_where()
+        embed_query(ctx.embedding_model, search.query), len(ids), where=SearchFilters(document_ids=ids).to_where()
     )
     order = [item["metadata"]["document_id"] for item in ranked] + [i for i in ids]
     registry, extractions = get_registry(), get_extraction_store()

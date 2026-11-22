@@ -1,10 +1,10 @@
-"""Contrato dos armazenamentos de vetores: o Chroma (cliente em memória) e o pgvector têm de responder igual,
-incluindo os filtros `where` que a aplicação gera (SearchFilters.to_chroma_where) e os scores.
+"""Contrato do armazenamento de vetores (pgvector), incluindo os filtros `where` que a aplicação gera
+(SearchFilters.to_where) e os scores.
 
-O pgvector precisa de um PostgreSQL com a extensão (ex.: imagem pgvector/pgvector:0.8.0-pg17) em
-TEST_DATABASE_URL; sem ela, ou sem a extensão no servidor, esses testes ficam por correr (skip):
+Precisa de um PostgreSQL com a extensão (ex.: imagem pgvector/pgvector:0.8.7-pg17-trixie) em TEST_DATABASE_URL;
+sem ela, ou sem a extensão no servidor, os testes ficam por correr (skip):
 
-    docker run -d --name rag-pgvector-test -e POSTGRES_PASSWORD=rag -p 55432:5432 pgvector/pgvector:0.8.0-pg17
+    docker run -d --name rag-pgvector-test -e POSTGRES_PASSWORD=rag -p 55432:5432 pgvector/pgvector:0.8.7-pg17-trixie
     TEST_DATABASE_URL=postgresql+psycopg://postgres:rag@localhost:55432/postgres pytest tests/test_vector_store_contract.py
 """
 
@@ -17,9 +17,8 @@ from sqlalchemy import text
 
 from backend.repositories.database import upgrade_database
 from backend.repositories.sql import create_db_engine
-from backend.services.pgvector_store import TABLE, PgVectorStore
 from backend.services.search_filters import SearchFilters
-from backend.services.vector_store import VectorStore
+from backend.services.vector_store import TABLE, VectorStore
 
 
 def _pg_engine():
@@ -34,19 +33,12 @@ def _pg_engine():
     return engine
 
 
-@pytest.fixture(params=["chroma", "pgvector"])
-def make_store(request):
+@pytest.fixture
+def make_store():
     """Fábrica de stores; cada nome é uma coleção nova (o PostgreSQL de testes é partilhado entre testes)."""
     suffix = uuid.uuid4().hex[:8]
-    if request.param == "chroma":
-        import chromadb
-        from chromadb.config import Settings as ChromaSettings
-
-        client = chromadb.EphemeralClient(ChromaSettings(anonymized_telemetry=False))
-        yield lambda name="chunks": VectorStore("", 0, f"{name}_{suffix}", client=client)
-        return
     engine = _pg_engine()
-    yield lambda name="chunks": PgVectorStore(engine, f"{name}_{suffix}")
+    yield lambda name="chunks": VectorStore(engine, f"{name}_{suffix}")
     with engine.begin() as conn:
         conn.execute(text(f"DELETE FROM {TABLE} WHERE collection LIKE :c"), {"c": f"%_{suffix}"})
 
@@ -128,11 +120,11 @@ def test_collections_are_separate(make_store, store):
     assert len(store.list_chunks("d1")) == 2
 
 
-def test_query_orders_by_similarity_with_chroma_scores(store):
+def test_query_orders_by_similarity_with_l2_scores(store):
     query = _unit(1, 0.2, 0)
     results = store.query(query, top_k=3)
     assert _ids(results) == ["d1:0", "d1:1", "d2:0"]
-    # Score do Chroma: 1 / (1 + L2²).
+    # Score: 1 / (1 + L2²).
     for result, chunk in zip(results, [CHUNKS[0], CHUNKS[1], CHUNKS[2]], strict=True):
         squared = sum((a - b) ** 2 for a, b in zip(query, chunk[1], strict=True))
         assert result["score"] == pytest.approx(1 / (1 + squared), abs=1e-5)
@@ -161,11 +153,11 @@ def test_query_by_document_id(store):
     ],
 )
 def test_query_where_filters(store, filters, expected):
-    results = store.query(_unit(1, 1, 1), top_k=10, where=filters.to_chroma_where())
+    results = store.query(_unit(1, 1, 1), top_k=10, where=filters.to_where())
     assert set(_ids(results)) == expected
 
 
 def test_query_where_types_must_match(store):
-    # Igualdade com tipo: o ano 2020 (número) não é "2020" (texto), como no Chroma.
+    # Igualdade com tipo: o ano 2020 (número) não é "2020" (texto).
     assert store.query(_unit(1, 1, 1), top_k=10, where={"year": "2020"}) == []
     assert set(_ids(store.query(_unit(1, 1, 1), top_k=10, where={"year": 2020}))) == {"d1:0", "d1:1"}

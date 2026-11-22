@@ -1,6 +1,6 @@
 """Configurações que se podem alterar na aplicação (página de configurações), por cima das do .env.
 
-Só entram as funcionais: as de infraestrutura (base de dados, Chroma, modelos, autenticação, pastas) ficam no
+Só entram as funcionais: as de infraestrutura (base de dados, modelos, autenticação, pastas) ficam no
 .env porque mudá-las com a aplicação a correr não faz sentido ou exige reiniciar. Cada entrada descreve como o
 frontend mostra o campo e os limites validados ao guardar."""
 

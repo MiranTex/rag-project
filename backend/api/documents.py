@@ -260,7 +260,7 @@ def _extract_for_review(info: DocumentInfo, is_new: bool) -> tuple[DocumentInfo,
 
 
 def _approve(info: DocumentInfo, pages: list[ReviewPage], approved_by: str) -> DocumentInfo:
-    """Fase 2: indexa o texto revisto (chunks, embeddings, Chroma e índice de palavras-chave)."""
+    """Fase 2: indexa o texto revisto (chunks, embeddings, vetores e índice de palavras-chave)."""
     settings = get_settings()
     vector_store = get_vector_store()
     keyword_index = get_keyword_index()
@@ -299,7 +299,7 @@ def _approve(info: DocumentInfo, pages: list[ReviewPage], approved_by: str) -> D
     # As referências gravadas são as do texto aprovado (incluindo correções feitas na revisão).
     document_metadata = store.load_metadata(info.document_id).model_copy(update={"references": find_references(segments)})
     store.save_metadata(info.document_id, document_metadata)
-    # O Chroma só aceita valores escalares e não aceita None: só entram os campos preenchidos.
+    # Metadados só com valores escalares e sem None (os filtros comparam valores simples): só entram os campos preenchidos.
     # Dos campos próprios do tipo, só os marcados como filterable (servem para filtrar pesquisas).
     document_fields = {
         key: value
@@ -717,7 +717,7 @@ def rename_document(document_id: str, payload: RenameRequest) -> DocumentInfo:
 
 @router.post("/{document_id}/approve", response_model=UploadResponse)
 def approve_document(document_id: str, user: AuthenticatedUser = Depends(can_approve)) -> UploadResponse:
-    """Põe o texto revisto na fila de indexação (chunks, embeddings, Chroma)."""
+    """Põe o texto revisto na fila de indexação (chunks, embeddings, vetores)."""
     with _locked(document_id):
         info, pages = _get_document_and_pages(document_id)
         _require_pending(info)

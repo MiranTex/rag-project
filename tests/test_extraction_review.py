@@ -138,7 +138,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(documents_api, "get_keyword_index", lambda: state["keywords"])
     monkeypatch.setattr(documents_api, "embed_texts", lambda model, texts: [[0.0] for _ in texts])
     monkeypatch.setattr(documents_api, "get_utility_llm", lambda: _FakeLLM())
-    # Índice de documentos falso: os testes não tocam no Chroma nem no modelo de embeddings.
+    # Índice de documentos falso: os testes não tocam nos vetores nem no modelo de embeddings.
     state["profiles"] = []
     monkeypatch.setattr(documents_api, "get_profile_store", lambda: state["vectors"])
     renamer = DocumentRenamer(
@@ -417,13 +417,13 @@ def test_failed_indexing_returns_to_review(env, monkeypatch):
     doc_id = _upload(env, ["Contrato"])["document_id"]
     env["client"].put(f"/documents/{doc_id}/pages/1", json={"text": "Texto suficiente para passar a validação automática."})
 
-    def chroma_down(model, texts):
-        raise ConnectionError("Chroma indisponível")
+    def vectors_down(model, texts):
+        raise ConnectionError("Vetores indisponíveis")
 
-    monkeypatch.setattr(documents_api, "embed_texts", chroma_down)
+    monkeypatch.setattr(documents_api, "embed_texts", vectors_down)
     doc = _approve(env, doc_id)
 
-    assert (doc["status"], doc["error"]) == ("pending_review", "Chroma indisponível")
+    assert (doc["status"], doc["error"]) == ("pending_review", "Vetores indisponíveis")
 
 
 def test_one_job_at_a_time_per_document(env):

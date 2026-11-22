@@ -38,7 +38,6 @@ from backend.models import LLMProviderConfig
 from backend.services.llm_providers import ConfigurableLLM, env_fallback
 from backend.services.memory import SessionMemory
 from backend.services.object_storage import storage_for
-from backend.services.pgvector_store import PgVectorStore
 from backend.services.rag_pipeline import RagPipeline
 from backend.services.vector_store import VectorStore
 
@@ -104,18 +103,16 @@ def get_extraction_store() -> ExtractionRepository:
     return SqlExtractionRepository(get_database())
 
 
-def build_vector_store(collection_name: str) -> VectorStore | PgVectorStore:
-    """Chroma ou pgvector (VECTOR_STORE; por defeito pgvector quando a base de dados é PostgreSQL). No pgvector
-    as coleções são linhas da tabela vector_embeddings, com os mesmos nomes (CHROMA_COLLECTION)."""
-    settings = get_settings()
-    if settings.vector_backend() == "pgvector":
-        return PgVectorStore(get_database(), collection_name)
-    return VectorStore(host=settings.chroma_host, port=settings.chroma_port, collection_name=collection_name)
+def build_vector_store(collection_name: str) -> VectorStore:
+    """Vetores no PostgreSQL da DATABASE_URL (pgvector); as coleções são linhas da tabela vector_embeddings."""
+    if not get_settings().uses_postgres():
+        raise RuntimeError("Os vetores ficam no PostgreSQL (pgvector): DATABASE_URL tem de ser PostgreSQL")
+    return VectorStore(get_database(), collection_name)
 
 
 @lru_cache(maxsize=1)
-def get_vector_store() -> VectorStore | PgVectorStore:
-    return build_vector_store(get_settings().chroma_collection)
+def get_vector_store() -> VectorStore:
+    return build_vector_store(get_settings().vector_collection)
 
 
 # Secções que não descrevem o assunto do documento (para o vetor de um documento sem resumo).
@@ -130,11 +127,11 @@ def document_body(chunks: list[dict]) -> str:
 
 
 @lru_cache(maxsize=1)
-def get_profile_store() -> VectorStore | PgVectorStore:
+def get_profile_store() -> VectorStore:
     """Índice de documentos (um vetor por documento). Na primeira utilização cria os vetores que faltam
     para documentos indexados antes de este índice existir."""
     settings = get_settings()
-    store = build_vector_store(f"{settings.chroma_collection}_profiles")
+    store = build_vector_store(f"{settings.vector_collection}_profiles")
     try:
         existing = store.list_ids()
         for info in get_registry().list_documents():

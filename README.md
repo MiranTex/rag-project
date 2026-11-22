@@ -1,10 +1,10 @@
-# RAG de Estudo com PDF, Chroma e LM Studio
+# RAG de Estudo com PDF, PostgreSQL (pgvector) e LM Studio
 
 Este projeto foi montado para estudo, com foco em execução local e aprendizagem passo a passo.
 
 Arquitetura desta versão:
 - LM Studio no host local, fora de Docker, em http://127.0.0.1:1234
-- Chroma em Docker para base vetorial
+- PostgreSQL com pgvector em Docker, para a base de dados e os vetores
 - Backend em FastAPI
 - Frontend em React
 
@@ -14,7 +14,7 @@ Arquitetura desta versão:
 2. O backend extrai texto por página.
 3. O texto é dividido em chunks com sobreposição.
 4. Cada chunk vira um embedding com modelo local HuggingFace.
-5. Os vetores e metadados são gravados no Chroma.
+5. Os vetores e metadados são gravados no PostgreSQL (pgvector).
 6. Quando fazes uma pergunta, o sistema:
 - gera embedding da pergunta,
 - recupera os chunks mais próximos,
@@ -56,16 +56,16 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-## Aula 2: Subir a base vetorial
+## Aula 2: Subir a base de dados e vetorial
 
-Subir apenas Chroma com Docker:
+Subir apenas o PostgreSQL (com pgvector) com Docker:
 
 ```bash
-docker compose up -d
+docker compose up -d postgres
 docker compose ps
 ```
 
-O Chroma ficará disponível em http://127.0.0.1:8001 no host.
+O PostgreSQL ficará disponível em `127.0.0.1:55433` no host (utilizador, password e base `rag`; outra porta com `POSTGRES_HOST_PORT`), que é a `DATABASE_URL` do `.env.example`. Guarda a base de dados da aplicação e os vetores, na tabela `vector_embeddings`.
 
 ## Aula 3: Levantar backend
 
@@ -238,7 +238,7 @@ Nota: no campo de pergunta, Enter envia a pergunta e Shift+Enter cria nova linha
 1. O endpoint `POST /chat/ask-stream` envia eventos SSE em tempo real.
 2. O frontend consome o stream e atualiza a resposta token a token.
 3. Os eventos emitidos são:
-- `sources`: fontes recuperadas no Chroma.
+- `sources`: fontes recuperadas na pesquisa vetorial.
 - `token`: fragmento de texto da resposta.
 - `done`: resposta final consolidada.
 - `error`: erro durante geração.
@@ -292,8 +292,8 @@ PDF sem texto:
 - Alguns PDFs são apenas imagem.
 - As páginas sem texto passam por OCR (ver Aula 11) e aparecem na revisão com alerta (ver Aula 13).
 
-Chroma indisponível:
-- Verificar se o container está up com docker compose ps.
+Base de dados indisponível (indicador "Vetores" vermelho):
+- Verificar se o container `rag_postgres` está up com docker compose ps.
 
 ## Próximos passos sugeridos
 
@@ -371,7 +371,7 @@ Antes do agente, um modelo pequeno (`GUARD_MODEL`, por defeito Haiku) classifica
 
 A indexação passou a ter duas fases, com uma validação entre elas:
 
-1. **Extração** (`POST /documents/upload`, `POST /documents/{id}/reindex`): pypdf + OCR. O texto de cada página fica em `backend/storage/extractions/{id}.json` e o documento fica `pending_review`, fora do Chroma e do índice de palavras-chave.
+1. **Extração** (`POST /documents/upload`, `POST /documents/{id}/reindex`): pypdf + OCR. O texto de cada página fica em `backend/storage/extractions/{id}.json` e o documento fica `pending_review`, fora dos vetores e do índice de palavras-chave.
 2. **Validação automática** (`backend/services/extraction_review.py`): cada página recebe alertas:
    - `empty`: sem texto;
    - `short`: menos de `OCR_MIN_TEXT_CHARS` caracteres;
@@ -466,11 +466,11 @@ Tools do agente para descobrir e comparar documentos, e não só para encontrar 
 | `read_document` | Agora também lê só uma secção (`section`) |
 
 **Filtros** (`backend/services/search_filters.py`):
-- Uma única especificação gera o `where` do Chroma e o predicado do índice de palavras-chave, por isso os dois caminhos da pesquisa híbrida filtram da mesma forma.
+- Uma única especificação gera o `where` dos vetores e o predicado do índice de palavras-chave, por isso os dois caminhos da pesquisa híbrida filtram da mesma forma.
 - Chaves desconhecidas (tipo, secção ou campo) devolvem ao modelo um erro com as opções válidas, para ele se corrigir.
 
 **Índice de documentos** (`backend/services/document_profiles.py`):
-- Fica numa segunda coleção do Chroma (`<CHROMA_COLLECTION>_profiles`), com um vetor por documento.
+- Fica numa segunda coleção de vetores (`<VECTOR_COLLECTION>_profiles`), com um vetor por documento.
 - O texto desse vetor é o título, as palavras-chave e o resumo; sem resumo, usa o início do corpo, sem elementos iniciais, referências nem anexos.
 - O vetor é criado na aprovação e apagado quando o documento volta à revisão ou é removido.
 - Documentos indexados antes deste índice recebem o vetor automaticamente na primeira utilização.
@@ -528,8 +528,8 @@ O código depende só de interfaces (`backend/repositories/contracts.py`):
 
 A implementação é escolhida em `backend/dependencies.py`:
 - **`backend/repositories/sql.py` (SQLAlchemy Core):** é a mesma para SQLite e PostgreSQL, e só muda a `DATABASE_URL`:
-  - `sqlite:///backend/storage/rag.db` (por defeito);
-  - `postgresql+psycopg://utilizador:password@host:5432/rag`.
+  - `postgresql+psycopg://utilizador:password@host:5432/rag` (a aplicação, que precisa do pgvector para os vetores);
+  - `sqlite:///…` (só nos testes, que não usam vetores).
 - **Outro tipo de base de dados:** é uma implementação nova dos mesmos contratos, sem mexer no resto do código.
 - **Esquema:** evolui com as migrações Alembic em `backend/repositories/migrations`, aplicadas no arranque.
 - **Campos novos:** um campo novo num modelo precisa de uma migração. O teste `test_migrations_match_tables_and_models` falha se faltar.
@@ -540,7 +540,7 @@ A implementação é escolhida em `backend/dependencies.py`:
   docker compose run --rm -e TEST_DATABASE_URL=postgresql+psycopg://rag:rag@pg:5432/rag_test backend pytest -q
   ```
 - **Dados da versão anterior:** o `documents.json` e as `extractions/*.json` são importados no primeiro arranque, com a base vazia. O ficheiro fica como `documents.json.imported`, como cópia de segurança.
-- **Testes isolados:** o `tests/conftest.py` aponta as dependências reais para uma base temporária e um Chroma inexistente, para nenhum teste tocar nos dados da aplicação.
+- **Testes isolados:** o `tests/conftest.py` aponta as dependências reais para uma base SQLite temporária, para nenhum teste tocar nos dados da aplicação.
 
 ### Fila de extração e indexação
 
@@ -558,7 +558,7 @@ O upload e a aprovação já não esperam pelo OCR nem pelos embeddings.
 
 - **Um trabalho de cada vez por documento:** um pedido com outro já em curso devolve 409.
 - **Remover um documento:** cancela o trabalho que estiver em fila.
-- **Workers:** correm dentro da API (`INDEXING_WORKERS`, por defeito 1). Para os separar, põe-se `INDEXING_WORKERS=0` na API e corre-se `python -m backend.worker` noutro processo ou contentor, com a mesma `DATABASE_URL`, os mesmos ficheiros (`UPLOAD_DIR` ou `STORAGE_*`) e os mesmos vetores (Chroma ou pgvector).
+- **Workers:** correm dentro da API (`INDEXING_WORKERS`, por defeito 1). Para os separar, põe-se `INDEXING_WORKERS=0` na API e corre-se `python -m backend.worker` noutro processo ou contentor, com a mesma `DATABASE_URL`, os mesmos ficheiros (`UPLOAD_DIR` ou `STORAGE_*`) (os vetores estão na base de dados).
 - **Trabalhos interrompidos:** os que ficaram `running` por um processo que morreu voltam à fila no arranque. São os deste contentor e os parados há mais de `JOB_STALE_MINUTES`.
 - **Estado da fila:** `GET /health` mostra os trabalhos por estado.
 - **Interface:** a lista atualiza-se sozinha enquanto houver documentos em processamento, e avisa quando um documento fica pronto para revisão, é indexado ou falha.
@@ -569,8 +569,8 @@ No Base Stack os serviços são contentores sem disco persistente: cada deploy a
 
 | O quê | Local (docker-compose) | Base Stack |
 |---|---|---|
-| Registo, extrações, fila, utilizadores | SQLite em `backend/storage` | Addon PostgreSQL (`DATABASE_URL`) |
-| Vetores (excertos e índice de documentos) | Chroma | O mesmo PostgreSQL, com pgvector (`VECTOR_STORE=pgvector`, automático com PostgreSQL) |
+| Registo, extrações, fila, utilizadores | PostgreSQL do compose (`rag_postgres`) | Addon PostgreSQL (`DATABASE_URL`) |
+| Vetores (excertos e índice de documentos) | O mesmo PostgreSQL, com pgvector | O mesmo PostgreSQL, com pgvector |
 | PDFs, exports, memória das conversas | `data/uploads`, `data/exports` | Addon storage S3 (`STORAGE_*`), prefixos `uploads/` e `exports/` |
 | Modelo de embeddings | Volume `hf_cache` | Embutido na imagem na construção |
 
@@ -616,11 +616,11 @@ O `EMBEDDING_MODEL` embutido é o de `--build-arg EMBEDDING_MODEL=…` (por defe
 
 ### Testes contra pgvector e S3
 
-Os testes de contrato dos vetores (`tests/test_vector_store_contract.py`) correm contra um Chroma em memória e, com `TEST_DATABASE_URL`, contra um PostgreSQL com pgvector. Os do storage (`tests/test_object_storage.py`) correm contra o disco, contra o `moto` se estiver instalado e contra um S3 real com `TEST_S3_ENDPOINT`:
+Os testes de contrato dos vetores (`tests/test_vector_store_contract.py`) correm com `TEST_DATABASE_URL` contra um PostgreSQL com pgvector (sem ela ficam por correr). Os do storage (`tests/test_object_storage.py`) correm contra o disco, contra o `moto` se estiver instalado e contra um S3 real com `TEST_S3_ENDPOINT`:
 
 ```bash
 docker network create rag-test
-docker run -d --rm --name pgv --network rag-test -e POSTGRES_PASSWORD=rag pgvector/pgvector:0.8.0-pg17
+docker run -d --rm --name pgv --network rag-test -e POSTGRES_PASSWORD=rag pgvector/pgvector:0.8.7-pg17-trixie
 docker run --rm --network rag-test -e TEST_DATABASE_URL=postgresql+psycopg://postgres:rag@pgv:5432/postgres \
   rag-project-backend pytest -q
 docker rm -f pgv && docker network rm rag-test

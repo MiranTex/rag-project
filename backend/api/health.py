@@ -6,17 +6,10 @@ from backend.dependencies import active_llm_config, get_job_queue, get_lmstudio_
 router = APIRouter(prefix="/health", tags=["health"])
 
 
-def _vector_backend(settings) -> str | None:
-    try:
-        return settings.vector_backend()
-    except ValueError:
-        return None
-
-
 @router.get("")
 def health() -> dict:
     lmstudio_ok = False
-    chroma_ok = False
+    vectors_ok = False
 
     try:
         lmstudio_ok = get_lmstudio_client().health()
@@ -24,9 +17,9 @@ def health() -> dict:
         lmstudio_ok = False
 
     try:
-        chroma_ok = bool(get_vector_store().heartbeat())
+        vectors_ok = bool(get_vector_store().heartbeat())
     except Exception:
-        chroma_ok = False
+        vectors_ok = False
 
     try:
         jobs = get_job_queue().counts()
@@ -38,14 +31,13 @@ def health() -> dict:
     except Exception:
         llm_provider = None
 
-    status = "ok" if lmstudio_ok and chroma_ok else "degraded"
+    status = "ok" if lmstudio_ok and vectors_ok else "degraded"
     settings = get_settings()
     return {
         "status": status,
         "lmstudio": lmstudio_ok,
-        # Armazenamento de vetores (Chroma ou pgvector, ver VECTOR_STORE); a chave mantém o nome antigo.
-        "chroma": chroma_ok,
-        "vector_store": _vector_backend(settings),
+        # Vetores (pgvector no PostgreSQL da aplicação).
+        "vectors": vectors_ok,
         # Fornecedor de LLM ativo (ver /settings/llm).
         "llm_provider": llm_provider,
         # Trabalhos por estado (queued, running, failed, done); None se a base de dados não responder.

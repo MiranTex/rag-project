@@ -119,11 +119,11 @@ def test_references_in_each_style():
 
 def test_document_ids_scope_in_both_indexes():
     scope = SearchFilters(document_ids=["a", "b"])
-    assert scope.to_chroma_where() == {"document_id": {"$in": ["a", "b"]}}
+    assert scope.to_where() == {"document_id": {"$in": ["a", "b"]}}
     assert scope.matches({"document_id": "a"}) and not scope.matches({"document_id": "c"})
     nothing = SearchFilters(document_ids=[])
     assert not nothing.is_empty() and not nothing.matches({"document_id": "a"})
-    assert nothing.to_chroma_where() == {"document_id": {"$in": ["__nenhum__"]}}
+    assert nothing.to_where() == {"document_id": {"$in": ["__nenhum__"]}}
 
 
 def test_text_is_split_into_paragraphs_and_claims():
