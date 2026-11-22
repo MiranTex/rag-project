@@ -576,7 +576,7 @@ No Base Stack os serviços são contentores sem disco persistente: cada deploy a
 
 ### Addons
 
-- **PostgreSQL com a opção vector** (PostgreSQL 17 com pgvector). Injeta `DATABASE_URL=postgres://…?sslmode=require`; a aplicação converte-a para `postgresql+psycopg://` e, no arranque, a migração `0006` cria a extensão `vector` e a tabela `vector_embeddings`.
+- **PostgreSQL com a opção vector** (PostgreSQL 17 com pgvector). Injeta `DATABASE_URL=postgres://…?sslmode=require`; a aplicação converte-a para `postgresql+psycopg://` e, no arranque, a migração `0008` cria a extensão `vector` e a tabela `vector_embeddings`.
 - **Storage** com o prefixo `STORAGE`. Injeta `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID` e `STORAGE_SECRET_ACCESS_KEY` (o `STORAGE_URL` não é usado). O bucket já existe.
 
 ### Serviços

@@ -18,7 +18,7 @@ from sqlalchemy import Engine, text
 
 TABLE = "vector_embeddings"
 
-# Idempotente: corre na migração 0006 e de novo ao criar o store (se a extensão só foi instalada depois).
+# Idempotente: corre na migração 0008 e de novo ao criar o store (se a extensão só foi instalada depois).
 # A coluna não fixa a dimensão (vector e não vector(384)): mudar de EMBEDDING_MODEL não obriga a alterar o
 # esquema, só a indexar de novo. A pesquisa é exata (sem índice HNSW), suficiente para alguns milhares de
 # documentos.

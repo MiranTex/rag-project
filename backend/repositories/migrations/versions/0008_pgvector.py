@@ -1,15 +1,15 @@
 """Vetores no PostgreSQL (pgvector): extensão vector e tabela vector_embeddings. Só em PostgreSQL e só se a
 extensão estiver disponível no servidor; nos outros casos não faz nada (os vetores ficam no Chroma).
 
-Revision ID: 0006
-Revises: 0005
+Revision ID: 0008
+Revises: 0007
 Create Date: 2026-11-21
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0006"
-down_revision = "0005"
+revision = "0008"
+down_revision = "0007"
 branch_labels = None
 depends_on = None
 
