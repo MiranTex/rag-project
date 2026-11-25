@@ -6,7 +6,7 @@ tests/test_job_queue.py)."""
 
 from typing import Any, Protocol
 
-from backend.models import CredentialScope, DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
+from backend.models import AccessToken, CredentialScope, DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
 from backend.research.models import (
     AnswerFeedback,
     Comment,
@@ -217,3 +217,17 @@ class LLMCredentialsRepository(Protocol):
     def save(self, scope: CredentialScope, owner_id: str, config: LLMProviderConfig, updated_by: str) -> None: ...
 
     def delete(self, scope: CredentialScope, owner_id: str) -> bool: ...
+
+
+class AccessTokenRepository(Protocol):
+    """Tokens pessoais para o servidor MCP (só o hash; ver auth/access_tokens.py)."""
+
+    def add(self, token: AccessToken) -> None: ...
+
+    def list_for(self, user_id: str) -> list[AccessToken]: ...
+
+    def find_by_hash(self, token_hash: str) -> AccessToken | None: ...
+
+    def touch(self, token_id: str, when: str) -> None: ...
+
+    def delete(self, user_id: str, token_id: str) -> bool: ...

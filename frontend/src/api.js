@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 const TOKEN_KEY = "rag-auth-token";
 
 // Sessão: token Bearer guardado no browser. Com login externo, o sistema anfitrião pode abrir a aplicação com
@@ -404,6 +404,18 @@ function ownKeyApi(base) {
 
 export const myLlmKey = ownKeyApi("/me/llm-key");
 export const projectLlmKey = (projectId) => ownKeyApi(`/research/projects/${projectId}/llm-key`);
+
+// Tokens pessoais para ligar agentes externos (Claude Code, Codex) ao servidor MCP. O token só vem ao criar.
+export const accessTokens = {
+  list: () => jsonRequest("/me/tokens", "GET", undefined, "Falha ao carregar os tokens"),
+  create: (name) => jsonRequest("/me/tokens", "POST", { name }, "Falha ao criar o token"),
+  revoke: (id) => jsonRequest(`/me/tokens/${id}`, "DELETE", undefined, "Falha ao revogar o token"),
+};
+
+export function mcpUrl() {
+  // Mantém um eventual prefixo do API_BASE (ex.: /api) e resolve URLs relativos contra a página.
+  return new URL(`${API_BASE.replace(/\/$/, "")}/mcp`, window.location.href).href;
+}
 
 export function getSettings() {
   return jsonRequest("/settings", "GET", undefined, "Falha ao carregar as configurações");

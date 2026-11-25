@@ -311,5 +311,19 @@ class LLMProviderConfig(BaseModel):
     active: bool = False
 
 
+class AccessToken(BaseModel):
+    """Token pessoal com que um agente externo (Claude Code, Codex…) usa o servidor MCP em nome de uma pessoa.
+    Só se guarda o hash; o token em si só é mostrado ao criá-lo."""
+
+    token_id: str
+    user_id: str
+    name: str
+    token_hash: str
+    prefix: str
+    scopes: str = "read"
+    created_at: str
+    last_used_at: str | None = None
+
+
 # A quem pertence uma chave de API própria (ver SqlLLMCredentialsRepository).
 CredentialScope = Literal["user", "project"]

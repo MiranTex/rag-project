@@ -9,6 +9,7 @@ from backend.auth.authenticators import Authenticator, build_authenticator
 from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_env_settings, get_settings, install_settings_source, on_settings_change
 from backend.repositories.contracts import (
+    AccessTokenRepository,
     DocumentRepository,
     ExtractionRepository,
     FeedbackRepository,
@@ -23,6 +24,7 @@ from backend.repositories.research_sql import SqlFeedbackRepository, SqlResearch
 from backend.repositories.database import upgrade_database
 from backend.repositories.legacy_import import import_legacy_json
 from backend.repositories.sql import (
+    SqlAccessTokenRepository,
     SqlDocumentRepository,
     SqlExtractionRepository,
     SqlJobQueue,
@@ -69,6 +71,11 @@ def get_job_queue() -> JobQueue:
 @lru_cache(maxsize=1)
 def get_users() -> UserRepository:
     return SqlUserRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_access_tokens() -> AccessTokenRepository:
+    return SqlAccessTokenRepository(get_database())
 
 
 @lru_cache(maxsize=1)

@@ -25,7 +25,7 @@ from sqlalchemy import (
     update,
 )
 
-from backend.models import CredentialScope, DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
+from backend.models import AccessToken, CredentialScope, DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
 from backend.services.secret_box import SecretBox
 
 metadata_obj = MetaData()
@@ -122,6 +122,19 @@ llm_providers = Table(
     Column("utility_model", String(255), nullable=False, default=""),
     Column("active", Boolean, nullable=False, default=False),
     Column("updated_at", String(40), nullable=False),
+)
+
+access_tokens = Table(
+    "access_tokens",
+    metadata_obj,
+    Column("token_id", String(64), primary_key=True),
+    Column("user_id", String(64), nullable=False, index=True),
+    Column("name", String(120), nullable=False),
+    Column("token_hash", String(64), nullable=False, unique=True),
+    Column("prefix", String(24), nullable=False),
+    Column("scopes", String(120), nullable=False, default="read"),
+    Column("created_at", String(40), nullable=False),
+    Column("last_used_at", String(40), nullable=True),
 )
 
 llm_credentials = Table(
@@ -473,5 +486,41 @@ class SqlLLMCredentialsRepository:
         with self.engine.begin() as conn:
             result = conn.execute(
                 delete(llm_credentials).where(llm_credentials.c.scope == scope, llm_credentials.c.owner_id == owner_id)
+            )
+        return result.rowcount > 0
+
+
+class SqlAccessTokenRepository:
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    @staticmethod
+    def _to_model(row) -> AccessToken:
+        return AccessToken(**row._mapping)
+
+    def add(self, token: AccessToken) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(insert(access_tokens).values(**token.model_dump()))
+
+    def list_for(self, user_id: str) -> list[AccessToken]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(access_tokens).where(access_tokens.c.user_id == user_id).order_by(access_tokens.c.created_at.desc())
+            )
+            return [self._to_model(row) for row in rows]
+
+    def find_by_hash(self, token_hash: str) -> AccessToken | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(select(access_tokens).where(access_tokens.c.token_hash == token_hash)).first()
+        return self._to_model(row) if row else None
+
+    def touch(self, token_id: str, when: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(update(access_tokens).where(access_tokens.c.token_id == token_id).values(last_used_at=when))
+
+    def delete(self, user_id: str, token_id: str) -> bool:
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                delete(access_tokens).where(access_tokens.c.token_id == token_id, access_tokens.c.user_id == user_id)
             )
         return result.rowcount > 0
