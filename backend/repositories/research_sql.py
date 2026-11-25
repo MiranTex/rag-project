@@ -91,6 +91,7 @@ project_comments = Table(
     Column("author_id", String(64), nullable=False),
     Column("text", Text, nullable=False),
     Column("created_at", String(40), nullable=False),
+    Column("via", String(120), nullable=False, default=""),
 )
 
 project_matrices = Table(

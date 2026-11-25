@@ -128,16 +128,23 @@ excertos numerados de documentos. Regras:
 - Se os excertos não chegam para um ponto, não o escrevas."""
 
 
-def state_of_art(topic: str, cards: list[DocumentCard], ctx: ToolContext, llm) -> dict:
-    """Rascunho com citações [n] a excertos numerados, a lista das fontes e as frases sem apoio.
-
-    `llm` é o modelo principal (chat), não o pequeno: aqui escreve-se texto para a pessoa ler."""
+def state_of_art_sources(topic: str, cards: list[DocumentCard], ctx: ToolContext) -> list[dict]:
+    """Os excertos numerados em que o estado da arte se apoia (dois por documento), com autor, ano e título.
+    Sem LLM: é o que um agente externo (MCP) recebe para escrever ele o texto."""
     sources: list[dict] = []
     for card in cards:
         for source in ctx.pipeline.retrieve_sources(question=topic, top_k=2, filters=SearchFilters(document_id=card.document_id)):
             excerpt = _excerpt(source, number=len(sources) + 1)
             excerpt.update(title=card.title, year=card.year, authors=card.authors)
             sources.append(excerpt)
+    return sources
+
+
+def state_of_art(topic: str, cards: list[DocumentCard], ctx: ToolContext, llm) -> dict:
+    """Rascunho com citações [n] a excertos numerados, a lista das fontes e as frases sem apoio.
+
+    `llm` é o modelo principal (chat), não o pequeno: aqui escreve-se texto para a pessoa ler."""
+    sources = state_of_art_sources(topic, cards, ctx)
     if not sources:
         return {"markdown": "", "sources": [], "unsupported": [], "invalid_citations": []}
 

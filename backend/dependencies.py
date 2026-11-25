@@ -1,3 +1,4 @@
+import copy
 import logging
 from functools import lru_cache
 
@@ -8,10 +9,13 @@ from backend.auth.authenticators import Authenticator, build_authenticator
 from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_env_settings, get_settings, install_settings_source, on_settings_change
 from backend.repositories.contracts import (
+    AccessTokenRepository,
+    OAuthRepository,
     DocumentRepository,
     ExtractionRepository,
     FeedbackRepository,
     JobQueue,
+    LLMCredentialsRepository,
     LLMSettingsRepository,
     ResearchRepository,
     SettingsRepository,
@@ -21,9 +25,12 @@ from backend.repositories.research_sql import SqlFeedbackRepository, SqlResearch
 from backend.repositories.database import upgrade_database
 from backend.repositories.legacy_import import import_legacy_json
 from backend.repositories.sql import (
+    SqlAccessTokenRepository,
+    SqlOAuthRepository,
     SqlDocumentRepository,
     SqlExtractionRepository,
     SqlJobQueue,
+    SqlLLMCredentialsRepository,
     SqlLLMSettingsRepository,
     SqlSettingsRepository,
     SqlUserRepository,
@@ -35,10 +42,11 @@ from backend.services.document_types import DocumentTypes, load_document_types
 from backend.services.export_store import ExportStore
 from backend.services.keyword_index import KeywordIndex
 from backend.models import LLMProviderConfig
-from backend.services.llm_providers import ConfigurableLLM, env_fallback
+from backend.services.llm_providers import ConfigurableLLM, LLMChoice, Role, choose_llm, env_fallback
 from backend.services.memory import SessionMemory
 from backend.services.object_storage import storage_for
 from backend.services.rag_pipeline import RagPipeline
+from backend.services.secret_box import SecretBox
 from backend.services.vector_store import VectorStore
 
 
@@ -65,6 +73,33 @@ def get_job_queue() -> JobQueue:
 @lru_cache(maxsize=1)
 def get_users() -> UserRepository:
     return SqlUserRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_access_tokens() -> AccessTokenRepository:
+    return SqlAccessTokenRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_oauth_repository() -> OAuthRepository:
+    return SqlOAuthRepository(get_database())
+
+
+def oauth_urls() -> tuple[str, str]:
+    """(URL público da API, URL público da interface); OAuth só fica ligado com os dois."""
+    settings = get_env_settings()
+    return settings.public_api_url.rstrip("/"), settings.public_app_url.rstrip("/")
+
+
+@lru_cache(maxsize=1)
+def get_oauth_provider():
+    """Servidor de autorização OAuth do MCP, ou None se PUBLIC_API_URL / PUBLIC_APP_URL não estiverem definidos."""
+    from backend.auth.oauth import OAuthProvider
+
+    api_url, app_url = oauth_urls()
+    if not (api_url and app_url):
+        return None
+    return OAuthProvider(get_oauth_repository, get_users, app_url)
 
 
 @lru_cache(maxsize=1)
@@ -177,7 +212,48 @@ def active_llm_config() -> LLMProviderConfig:
 
 
 @lru_cache(maxsize=1)
+def get_secret_box() -> SecretBox:
+    return SecretBox(get_env_settings().credentials_secret_key)
+
+
+@lru_cache(maxsize=1)
+def get_llm_credentials() -> LLMCredentialsRepository:
+    return SqlLLMCredentialsRepository(get_database(), get_secret_box())
+
+
+def resolve_llm(user_id: str | None, project_id: str | None = None) -> LLMChoice:
+    """Fornecedor e chave de um pedido: do projeto, da pessoa ou da plataforma (ver choose_llm).
+
+    project_id só depois de confirmar que a pessoa é membro do projeto (load_project / project_scope): aqui não
+    se volta a verificar, e a chave do projeto não pode servir quem não pertence a ele."""
+    if not get_secret_box().available:
+        return LLMChoice(active_llm_config(), "platform")
+    credentials = get_llm_credentials()
+    project = credentials.get("project", project_id) if project_id else None
+    user = credentials.get("user", user_id) if user_id else None
+    return choose_llm(project, user, active_llm_config)
+
+
+def llm_for(user_id: str | None, project_id: str | None = None, role: Role = "chat") -> ConfigurableLLM:
+    """Cliente de LLM para um pedido, com a chave que lhe cabe (escolhida uma vez, ao criar o cliente)."""
+    choice = resolve_llm(user_id, project_id)
+    return ConfigurableLLM(lambda: choice.config, role=role)
+
+
+def pipeline_for(user_id: str | None, project_id: str | None = None) -> RagPipeline:
+    """O pipeline partilhado (índices, memória), mas a responder com a chave deste pedido."""
+    pipeline = copy.copy(get_rag_pipeline())
+    pipeline.lmstudio_client = llm_for(user_id, project_id)
+    return pipeline
+
+
+def scope_guard_for(user_id: str | None, project_id: str | None = None) -> ScopeGuard:
+    return ScopeGuard(llm_for(user_id, project_id, "utility"), get_settings().knowledge_base_description)
+
+
+@lru_cache(maxsize=1)
 def get_lmstudio_client() -> ConfigurableLLM:
+    """Sempre com a chave da plataforma (estado de saúde, avaliação). Pedidos de pessoas: llm_for."""
     return ConfigurableLLM(active_llm_config, role="chat")
 
 
@@ -211,15 +287,11 @@ def get_tool_registry() -> ToolRegistry:
 def get_utility_llm() -> ConfigurableLLM:
     """Modelo pequeno e barato para tarefas curtas e estruturadas (classificar, extrair campos), que não
     respondem ao utilizador. Também aceita tool_choice forçado, ao contrário de alguns modelos de chat.
-    Sem modelo utilitário configurado, usa o modelo de chat."""
+    Sem modelo utilitário configurado, usa o modelo de chat. Sempre com a chave da plataforma: serve a ficha dos
+    documentos, que são da base toda e não de uma pessoa ou projeto. Pedidos de pessoas: llm_for."""
     return ConfigurableLLM(active_llm_config, role="utility")
 
 
-@lru_cache(maxsize=1)
-def get_scope_guard() -> ScopeGuard:
-    return ScopeGuard(get_utility_llm(), get_settings().knowledge_base_description)
-
-
 # Serviços que guardam valores das configurações quando são criados: recriam-se quando estas mudam.
-for _cached in (get_rag_pipeline, get_scope_guard, get_renamer):
+for _cached in (get_rag_pipeline, get_renamer):
     on_settings_change(_cached.cache_clear)

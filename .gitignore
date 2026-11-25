@@ -12,3 +12,6 @@ data/exports/
 # Claude Code
 .claude/
 CLAUDE.local.md
+
+# Ligação local do Claude Code ao servidor MCP (tem um token pessoal)
+.mcp.json

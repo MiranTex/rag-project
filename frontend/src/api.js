@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 const TOKEN_KEY = "rag-auth-token";
 
 // Sessão: token Bearer guardado no browser. Com login externo, o sistema anfitrião pode abrir a aplicação com
@@ -388,6 +388,43 @@ export function saveLlmProvider(provider, body) {
 
 export function testLlmProvider(provider, body) {
   return jsonRequest(`/settings/llm/${provider}/test`, "POST", body, "Falha ao testar o modelo de linguagem");
+}
+
+// Chaves de API próprias (a da pessoa e a de cada projeto). Nunca voltam completas.
+// Quem paga um pedido: chave do projeto, senão a da pessoa, senão a da plataforma.
+function ownKeyApi(base) {
+  return {
+    get: () => jsonRequest(base, "GET", undefined, "Falha ao carregar a chave de API"),
+    // api_key: null mantém a chave guardada.
+    save: (body) => jsonRequest(base, "PUT", body, "Falha ao guardar a chave de API"),
+    remove: () => jsonRequest(base, "DELETE", undefined, "Falha ao remover a chave de API"),
+    test: (body) => jsonRequest(`${base}/test`, "POST", body, "Falha ao testar a chave de API"),
+  };
+}
+
+export const myLlmKey = ownKeyApi("/me/llm-key");
+export const projectLlmKey = (projectId) => ownKeyApi(`/research/projects/${projectId}/llm-key`);
+
+// Tokens pessoais para ligar agentes externos (Claude Code, Codex) ao servidor MCP. O token só vem ao criar.
+export const accessTokens = {
+  list: () => jsonRequest("/me/tokens", "GET", undefined, "Falha ao carregar os tokens"),
+  create: (name, canWrite = false) => jsonRequest("/me/tokens", "POST", { name, can_write: canWrite }, "Falha ao criar o token"),
+  revoke: (id) => jsonRequest(`/me/tokens/${id}`, "DELETE", undefined, "Falha ao revogar o token"),
+};
+
+// Login OAuth do servidor MCP: a página de consentimento e as aplicações ligadas na conta.
+export const oauth = {
+  request: (id) => jsonRequest(`/oauth/requests/${encodeURIComponent(id)}`, "GET", undefined, "Falha ao abrir o pedido de autorização"),
+  approve: (id, canWrite) =>
+    jsonRequest(`/oauth/requests/${encodeURIComponent(id)}/approve`, "POST", { can_write: canWrite }, "Falha ao autorizar a aplicação"),
+  deny: (id) => jsonRequest(`/oauth/requests/${encodeURIComponent(id)}/deny`, "POST", {}, "Falha ao recusar o pedido"),
+  apps: () => jsonRequest("/me/apps", "GET", undefined, "Falha ao carregar as aplicações ligadas"),
+  revoke: (grantId) => jsonRequest(`/me/apps/${grantId}`, "DELETE", undefined, "Falha ao revogar o acesso"),
+};
+
+export function mcpUrl() {
+  // Mantém um eventual prefixo do API_BASE (ex.: /api) e resolve URLs relativos contra a página.
+  return new URL(`${API_BASE.replace(/\/$/, "")}/mcp`, window.location.href).href;
 }
 
 export function getSettings() {

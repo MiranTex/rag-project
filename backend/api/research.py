@@ -25,7 +25,7 @@ from backend.dependencies import (
     get_extraction_store,
     get_registry,
     get_research_repository,
-    get_utility_llm,
+    llm_for,
 )
 from backend.research.access import project_scope, research_context
 from backend.research.discovery import analyze_text, check_claims, gaps, theme_map
@@ -58,6 +58,12 @@ MAX_DRAFT_CHARS = 40_000
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _llm(user: AuthenticatedUser, project_id: str | None, scope: list[str] | None):
+    """Modelo utilitário com a chave que cabe ao pedido. O projeto só conta se project_scope já o verificou
+    (scope não é None): sem isso, a chave do projeto não entra."""
+    return llm_for(user.user_id, project_id if scope is not None else None, "utility")
 
 
 def _filters(filters: ResearchFilters, scope: list[str] | None) -> SearchFilters:
@@ -242,14 +248,16 @@ def mark_search_seen(search_id: str, user: AuthenticatedUser = Depends(can_resea
 async def topic_map(payload: TopicRequest, user: AuthenticatedUser = Depends(can_research)) -> dict:
     scope = project_scope(payload.project_id, user)
     filters = _filters(payload.filters, scope)
-    return await _in_thread(theme_map, payload.topic, filters, payload.max_documents, research_context(user, scope), get_utility_llm())
+    llm = _llm(user, payload.project_id, scope)
+    return await _in_thread(theme_map, payload.topic, filters, payload.max_documents, research_context(user, scope), llm)
 
 
 @router.post("/gaps")
 async def topic_gaps(payload: TopicRequest, user: AuthenticatedUser = Depends(can_research)) -> dict:
     scope = project_scope(payload.project_id, user)
     filters = _filters(payload.filters, scope)
-    return await _in_thread(gaps, payload.topic, filters, min(payload.max_documents, 20), research_context(user, scope), get_utility_llm())
+    llm = _llm(user, payload.project_id, scope)
+    return await _in_thread(gaps, payload.topic, filters, min(payload.max_documents, 20), research_context(user, scope), llm)
 
 
 def _text_from_upload(name: str, raw: bytes) -> str:
@@ -286,14 +294,15 @@ async def text_analysis(
         raise HTTPException(status_code=422, detail="Cola ou carrega um texto com pelo menos 50 caracteres.")
     scope = project_scope(project_id or None, user)
     filters = SearchFilters(document_ids=scope)
-    result = await _in_thread(analyze_text, text, filters, research_context(user, scope), get_utility_llm())
+    result = await _in_thread(analyze_text, text, filters, research_context(user, scope), _llm(user, project_id, scope))
     return {**result, "characters": len(text)}
 
 
 @router.post("/check-claims")
 async def claims(payload: ClaimCheckRequest, user: AuthenticatedUser = Depends(can_research)) -> dict:
     scope = project_scope(payload.project_id, user)
-    return await _in_thread(check_claims, payload.text, SearchFilters(document_ids=scope), research_context(user, scope), get_utility_llm())
+    llm = _llm(user, payload.project_id, scope)
+    return await _in_thread(check_claims, payload.text, SearchFilters(document_ids=scope), research_context(user, scope), llm)
 
 
 # ---- Escrever ----
@@ -304,7 +313,8 @@ async def work_skeleton(payload: SkeletonRequest, user: AuthenticatedUser = Depe
     if payload.work_type and payload.work_type not in get_document_types().types:
         raise HTTPException(status_code=422, detail=f"Tipo de trabalho desconhecido: {payload.work_type}")
     scope = project_scope(payload.project_id, user) if payload.project_id else None
-    result = await _in_thread(skeleton, payload.topic, payload.work_type, scope, research_context(user, scope), get_utility_llm())
+    llm = _llm(user, payload.project_id, scope)
+    result = await _in_thread(skeleton, payload.topic, payload.work_type, scope, research_context(user, scope), llm)
     return {**result, "markdown": skeleton_markdown(result)}
 
 

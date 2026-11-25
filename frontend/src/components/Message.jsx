@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, BookmarkPlus, Check, ChevronRight, Copy, FileText, ThumbsDown, ThumbsUp } from "lucide-react";
+import { AlertCircle, BookmarkPlus, Bot, Check, ChevronRight, Copy, FileText, ThumbsDown, ThumbsUp } from "lucide-react";
 import { sendFeedback } from "../api";
 import { useResearch } from "../research/ResearchContext";
 import AgentSteps from "./AgentSteps";
@@ -243,6 +243,12 @@ export default function Message({ msg, pending, onChange }) {
       </div>
 
       <div className="group">
+        {msg.via && (
+          <p className="mb-2 flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400">
+            <Bot className="size-3.5" />
+            Enviado por um agente externo ({msg.via}), em nome de quem começou a conversa.
+          </p>
+        )}
         {isAgent && <AgentSteps steps={msg.steps} done={done} stopped={msg.stopped} />}
 
         {isError ? (

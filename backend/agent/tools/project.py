@@ -33,7 +33,7 @@ def _section_titles(workspace: ProjectWorkspace) -> dict[str, str]:
     return {s.key: s.title for s in workspace.project.structure.sections}
 
 
-def _find_item(workspace: ProjectWorkspace, reference: str) -> NotebookItem:
+def find_item(workspace: ProjectWorkspace, reference: str) -> NotebookItem:
     """Encontra uma entrada pelo item_id ou pela referência (RF-001…), sem distinguir maiúsculas."""
     reference = reference.strip()
     items = workspace.repository.list_items(workspace.project.project_id)
@@ -50,6 +50,9 @@ def _find_item(workspace: ProjectWorkspace, reference: str) -> NotebookItem:
 
 def _comment_view(comment: Comment, names: dict[str, str], refs: dict[str, str] | None = None) -> dict:
     view = {"author": names.get(comment.author_id, "?"), "date": comment.created_at[:10], "text": comment.text}
+    if comment.via:
+        # Escrito por um agente externo em nome do autor (o nome do token).
+        view["via"] = comment.via
     if refs is not None:
         # Entrada comentada (referência ou título); None: comentário ao projeto em geral.
         view["item"] = refs.get(comment.item_id, comment.item_id) if comment.item_id else None
@@ -126,7 +129,7 @@ class GetItemParams(BaseModel):
 )
 def get_project_item(params: GetItemParams, context: ToolContext) -> ToolResult:
     workspace = _workspace(context)
-    item = _find_item(workspace, params.item)
+    item = find_item(workspace, params.item)
     comments = [c for c in workspace.repository.list_comments(workspace.project.project_id) if c.item_id == item.item_id]
     names = workspace.user_names() if comments else {}
     view = _view(item, _section_titles(workspace), full=True) | {"comments": [_comment_view(c, names) for c in comments]}
@@ -151,7 +154,7 @@ def list_project_comments(params: ListCommentsParams, context: ToolContext) -> T
     workspace = _workspace(context)
     comments = workspace.repository.list_comments(workspace.project.project_id)
     if params.item:
-        item_id = _find_item(workspace, params.item).item_id
+        item_id = find_item(workspace, params.item).item_id
         comments = [c for c in comments if c.item_id == item_id]
     if params.query and params.query.strip():
         wanted = params.query.strip().lower()
@@ -249,7 +252,7 @@ def propose_item_changes(params: ProposeParams, context: ToolContext) -> ToolRes
             else:
                 if not change.item:
                     raise ToolError("indica a entrada a alterar em 'item'")
-                item = _find_item(workspace, change.item)
+                item = find_item(workspace, change.item)
                 changed = {key: value for key, value in fields.items() if getattr(item, key) != value}
                 if not changed:
                     raise ToolError(f"a proposta não muda nada em {change.item}")

@@ -17,11 +17,11 @@ from backend.config import get_settings
 from backend.dependencies import (
     get_document_types,
     get_extraction_store,
-    get_lmstudio_client,
+    get_llm_credentials,
     get_registry,
     get_research_repository,
     get_users,
-    get_utility_llm,
+    llm_for,
 )
 from backend.research.access import load_project, project_document_ids, research_context
 from backend.research.bibliography import bibliography
@@ -188,6 +188,7 @@ def update_project(project_id: str, payload: ProjectUpdate, user: AuthenticatedU
 def delete_project(project_id: str, user: AuthenticatedUser = Depends(can_research)) -> dict:
     load_project(project_id, user, "owner")
     get_research_repository().delete_project(project_id)
+    get_llm_credentials().delete("project", project_id)
     return {"message": "Projeto apagado."}
 
 
@@ -200,7 +201,8 @@ async def draft_from_conversation(payload: ConversationDraftRequest, user: Authe
 
     def run() -> ProjectDraft:
         try:
-            draft = draft_project(payload.turns, payload.goal, get_utility_llm())
+            # Ainda não há projeto: paga a pessoa (se tem chave) ou a plataforma.
+            draft = draft_project(payload.turns, payload.goal, llm_for(user.user_id, None, "utility"))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         registry = get_registry()
@@ -474,8 +476,9 @@ def update_item(project_id: str, item_id: str, payload: ItemUpdate, user: Authen
     project, _ = load_project(project_id, user, "editor")
     item = _project_item(project_id, item_id)
     changes = payload.model_dump(exclude_none=True)
-    if "basis" in changes:
-        changes["source"] = {**item.source, "basis": changes.pop("basis")}
+    source_updates = {key: changes.pop(key) for key in ("basis", "via") if key in changes}
+    if source_updates:
+        changes["source"] = {**item.source, **source_updates}
     _check_item_fields(project, changes.get("section"), changes.get("status"))
     if "tags" in changes:
         changes["tags"] = _clean_tags(changes["tags"])
@@ -684,7 +687,7 @@ async def fill_project_matrix(project_id: str, payload: MatrixFillRequest, user:
 
     def run() -> dict:
         try:
-            filled = fill_matrix(cards, dimensions, research_context(user, ids), get_utility_llm())
+            filled = fill_matrix(cards, dimensions, research_context(user, ids), llm_for(user.user_id, project_id, "utility"))
         except ToolError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         repo = get_research_repository()
@@ -718,7 +721,7 @@ async def project_state_of_art(project_id: str, payload: StateOfArtRequest, user
 
     def run() -> dict:
         try:
-            result = state_of_art(topic, cards, research_context(user, ids), get_lmstudio_client())
+            result = state_of_art(topic, cards, research_context(user, ids), llm_for(user.user_id, project_id))
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Não foi possível gerar o rascunho: {exc}") from exc
         result["bibliography"] = bibliography(cards, "apa")

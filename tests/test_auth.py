@@ -164,7 +164,7 @@ def api(users, tmp_path, monkeypatch):
     monkeypatch.setattr(auth_api, "get_authenticator", lambda: authenticator)
     monkeypatch.setattr(security, "get_authenticator", lambda: authenticator)
     monkeypatch.setattr(exports_api, "get_export_store", lambda: exports)
-    monkeypatch.setattr(chat_api, "get_rag_pipeline", lambda: _FakePipeline())
+    monkeypatch.setattr(chat_api, "pipeline_for", lambda *args, **kwargs: _FakePipeline())
     monkeypatch.setattr(chat_api, "get_settings", lambda: settings)
 
     app = FastAPI()
