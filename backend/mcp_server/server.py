@@ -81,6 +81,8 @@ Servidor da base de conhecimento e dos projetos de pesquisa da equipa. Responde 
   numa conversa do projeto, que a equipa aceita ou rejeita; nunca digas que já ficaram no caderno. Passa o
   conversation_id devolvido para juntar as propostas seguintes da mesma sessão. add_comment comenta o projeto ou
   uma entrada. Fica tudo assinado com o nome da pessoa e do teu token.
+- Estado da arte, matriz, esqueleto, mapa do tema, lacunas e verificação de afirmações: as tools dão-te o material
+  (excertos, fichas, contagens) e as regras; és tu que escreves. Segue as regras que vêm em cada resultado.
 """.strip()
 
 PROJECT_ID_SCHEMA = {
@@ -304,6 +306,9 @@ def _add_comment(caller: Caller, arguments: dict) -> dict:
 
 
 def build_tools() -> dict[str, McpTool]:
+    # Import tardio: workflows.py usa este módulo, que tem de estar carregado primeiro.
+    from backend.mcp_server.workflows import workflow_tools
+
     registry = get_tool_registry()
     project_tools = {t.name: t for t in PROJECT_TOOLS}
     tools = [
@@ -349,6 +354,7 @@ def build_tools() -> dict[str, McpTool]:
             _add_comment,
             write=True,
         ),
+        *workflow_tools(),
     ]
     return {t.definition.name: t for t in tools}
 
@@ -361,6 +367,8 @@ def _text_result(payload: Any, is_error: bool = False) -> types.CallToolResult:
 
 
 def build_server(tools: dict[str, McpTool]) -> Server:
+    from backend.mcp_server import workflows
+
     server: Server = Server("rag-knowledge-base", instructions=INSTRUCTIONS)
 
     def caller() -> Caller:
@@ -371,6 +379,14 @@ def build_server(tools: dict[str, McpTool]) -> Server:
         # Um token só de leitura nem vê as tools de escrita.
         can_write = caller().can_write
         return [t.definition for t in tools.values() if can_write or not t.write]
+
+    @server.list_prompts()
+    async def list_prompts() -> list[types.Prompt]:
+        return workflows.list_prompts()
+
+    @server.get_prompt()
+    async def get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
+        return workflows.get_prompt(name, arguments)
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> types.CallToolResult:

@@ -202,10 +202,10 @@ def test_mcp_wraps_the_agent_tools_with_the_project_scope(client):
     assert error and "query" in data
 
 
-def test_real_tool_list_writes_only_through_proposals_and_comments():
+def test_real_tool_list_writes_only_through_proposals_comments_and_the_matrix():
     tools = mcp.build_tools()
-    assert {"search_documents", "read_document", "list_project_items", "list_projects"} <= set(tools)
-    assert {name for name, t in tools.items() if t.write} == {"propose_item_changes", "add_comment"}
+    assert {"search_documents", "read_document", "list_project_items", "list_projects", "state_of_art_sources"} <= set(tools)
+    assert {name for name, t in tools.items() if t.write} == {"propose_item_changes", "add_comment", "save_matrix"}
     assert not set(tools) & {"export_csv", "export_document", "calculate"}
 
 

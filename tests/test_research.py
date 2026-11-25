@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import backend.api.chat as chat_api
@@ -873,3 +873,100 @@ def test_agent_can_work_in_a_project_without_documents(api):
         access.project_scope(pid, api["user"])  # a pesquisa normal continua a pedir documentos
     project = api["repo"].get_project(pid)
     assert "ainda não tem documentos" in project_note(project, document_count=0, item_count=0, can_edit=True)
+
+
+# ---------------------------------------------------------------- MCP: o agente externo escreve, a plataforma dá o material
+
+
+def _mcp(api, base, monkeypatch, name="ana"):
+    """As tools de fluxo do MCP, chamadas por `name` com um token de escrita. Nenhuma pode chamar o LLM da
+    plataforma: o FakeLLM não tem respostas, por isso qualquer chamada rebentava."""
+    from backend.mcp_server import workflows
+    from backend.mcp_server.server import Caller
+
+    api["llm"].answers.clear()
+    for attr, value in {
+        "get_registry": lambda: base["registry"],
+        "get_extraction_store": lambda: base["extractions"],
+        "get_research_repository": lambda: api["repo"],
+    }.items():
+        monkeypatch.setattr(workflows, attr, value)
+    monkeypatch.setattr(
+        workflows,
+        "_caller_context",
+        lambda caller, pid: ToolContext(
+            **{**vars(base["ctx"]), "scope_document_ids": access.project_scope(pid, caller.user, allow_empty=True) if pid else None}
+        ),
+    )
+    return workflows, Caller(api["people"][name], f"Claude de {name}", ("read", "write"))
+
+
+def _project_with(api, *documents, question="Como recomendar livros?"):
+    client = _as(api, "ana")
+    pid = client.post("/research/projects", json={"title": "P", "question": question}).json()["project"]["project_id"]
+    for document_id in documents:
+        client.post(f"/research/projects/{pid}/documents/{document_id}")
+    client.post(f"/research/projects/{pid}/members", json={"username": "rui", "role": "viewer"})
+    return pid
+
+
+def test_mcp_state_of_art_gives_sources_and_rules_without_the_platform_llm(api, base, monkeypatch):
+    workflows, caller = _mcp(api, base, monkeypatch)
+    pid = _project_with(api, "rec1")
+    result = workflows._state_of_art(caller, {"project_id": pid})
+    assert result["topic"] == "Como recomendar livros?"
+    assert result["sources"][0]["n"] == 1 and result["sources"][0]["filename"] == "rec1.pdf"
+    assert result["bibliography"] == ["Martins, A. (2022). Recomendação em bibliotecas [Dissertação]."]
+    assert "[ficheiro, p.X]" in result["how_to_write"] and "propose_item_changes" in result["how_to_write"]
+
+    empty = _project_with(api)
+    with pytest.raises(ToolError, match="documentos fixados"):
+        workflows._state_of_art(caller, {"project_id": empty})
+
+
+def test_mcp_matrix_material_and_save_keep_the_team_notes(api, base, monkeypatch):
+    workflows, caller = _mcp(api, base, monkeypatch)
+    pid = _project_with(api, "rec1", "rec2")
+    _as(api, "ana").put(f"/research/projects/{pid}/matrix", json={"dimensions": ["método"], "notes": {"rec1": {"método": "Ver p. 2"}}})
+
+    material = workflows._matrix_material(caller, {"project_id": pid, "dimensions": ["método"]})
+    assert material["cells"]["rec2"]["método"]["excerpts"][0]["page"] == 2 and material["cells"]["rec1"]["método"]["summary"] == ""
+    assert material["team_notes"] == {"rec1": {"método": "Ver p. 2"}} and set(material["documents"]) == {"rec1", "rec2"}
+
+    summaries = [{"document_id": "rec1", "dimension": "método", "summary": "Filtragem colaborativa [rec1.pdf, p.2]."}]
+    assert workflows._save_matrix(caller, {"project_id": pid, "dimensions": ["método"], "summaries": summaries})["saved_cells"] == 1
+    saved = api["repo"].get_matrix(pid)
+    assert saved["cells"]["rec1"]["método"]["summary"].startswith("Filtragem") and saved["filled_by"] == "Claude de ana"
+    assert saved["notes"] == {"rec1": {"método": "Ver p. 2"}}
+
+    with pytest.raises(ToolError, match="não existem"):
+        workflows._save_matrix(caller, {"project_id": pid, "dimensions": ["método"], "summaries": [{**summaries[0], "document_id": "x"}]})
+    _, viewer = _mcp(api, base, monkeypatch, "rui")
+    with pytest.raises(HTTPException) as denied:
+        workflows._save_matrix(viewer, {"project_id": pid, "dimensions": ["método"], "summaries": summaries})
+    assert denied.value.status_code == 403
+
+
+def test_mcp_skeleton_claims_and_gaps_return_material_only(api, base, monkeypatch):
+    workflows, caller = _mcp(api, base, monkeypatch)
+    skeleton = workflows._skeleton(caller, {"topic": "recomendação de livros", "work_type": "academic"})
+    methodology = next(s for s in skeleton["sections"] if s["key"] == "methodology")
+    assert methodology["questions"] == [] and methodology["relevant"] and "perguntas" in skeleton["how_to_use"]
+    with pytest.raises(ToolError, match="Tipo de trabalho desconhecido"):
+        workflows._skeleton(caller, {"topic": "x y z", "work_type": "inventado"})
+
+    claims = workflows._check_claims(caller, {"text": "A recomendação em bibliotecas usa o histórico de empréstimos dos leitores."})
+    assert claims["claims"][0]["verdict"] == "unchecked" and claims["claims"][0]["evidence"]
+
+    gaps = workflows._gaps(caller, {"topic": "recomendação de livros"})
+    assert "suggestions" in gaps and "note" in gaps
+
+
+def test_mcp_prompts_guide_the_external_agent():
+    from backend.mcp_server import workflows
+
+    assert {p.name for p in workflows.list_prompts()} == {"estado-da-arte", "preencher-matriz", "verificar-texto", "esqueleto"}
+    text = workflows.get_prompt("preencher-matriz", {"projeto": "Tese", "dimensoes": "Método, Amostra"}).messages[0].content.text
+    assert "«Tese»" in text and "matrix_material" in text and "save_matrix" in text
+    with pytest.raises(ValueError, match="dimensoes"):
+        workflows.get_prompt("preencher-matriz", {"projeto": "Tese"})
