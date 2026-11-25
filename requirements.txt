@@ -17,3 +17,4 @@ alembic==1.14.0
 psycopg[binary]==3.2.3
 boto3==1.35.36
 PyJWT[crypto]==2.15.1
+cryptography==50.0.2

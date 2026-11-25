@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     # Chave dos tokens locais (HS256). Vazia: gerada no arranque (as sessões caem a cada reinício).
     auth_secret_key: str = ""
     auth_token_minutes: int = 480
+    # Chave mestra que cifra as chaves de API próprias (de utilizadores e projetos). Vazia: chaves próprias
+    # desligadas. Mudá-la torna ilegíveis as chaves já guardadas.
+    credentials_secret_key: str = ""
     # Convites para projetos: quem recebe um link pode criar conta (só no login local) com estes papéis.
     invite_signup_enabled: bool = True
     invite_signup_roles: str = "chat"

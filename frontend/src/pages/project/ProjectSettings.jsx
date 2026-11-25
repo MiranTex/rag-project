@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2, X } from "lucide-react";
-import { research } from "../../api";
+import { projectLlmKey, research } from "../../api";
+import OwnLlmKey from "../../components/OwnLlmKey";
 import { Button, Drawer, ErrorText, Field, IconButton, inputClass, uniqueKey, useConfirm } from "../../components/ui";
 
 // Secções do caderno e estados das entradas. As chaves não mudam ao renomear, para as entradas continuarem
@@ -207,6 +208,11 @@ export default function ProjectSettings({ detail, onSaved, onDeleted, onClose })
         </section>
 
         <ErrorText>{error}</ErrorText>
+
+        <section>
+          <h3 className="mb-3 text-sm font-semibold">Chave de API</h3>
+          <OwnLlmKey api={projectLlmKey(project.project_id)} scope="project" />
+        </section>
 
         {isOwner && (
           <section className="rounded-xl border border-red-200 p-4 dark:border-red-900/60">

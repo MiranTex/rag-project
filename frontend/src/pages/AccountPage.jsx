@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { KeyRound } from "lucide-react";
-import { changePassword } from "../api";
+import { changePassword, myLlmKey } from "../api";
+import OwnLlmKey from "../components/OwnLlmKey";
 import PageShell from "../components/PageShell";
 import { Button, Card, ErrorText, Field, Section, inputClass } from "../components/ui";
 
@@ -52,6 +53,11 @@ export default function AccountPage({ user, onOpenSidebar, onSaved }) {
               </Button>
             </div>
           </form>
+        </Card>
+      </Section>
+      <Section title="A minha chave de API">
+        <Card className="max-w-2xl p-4">
+          <OwnLlmKey api={myLlmKey} scope="user" onSaved={onSaved} />
         </Card>
       </Section>
     </PageShell>

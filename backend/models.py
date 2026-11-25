@@ -309,3 +309,7 @@ class LLMProviderConfig(BaseModel):
     # Modelo pequeno para tarefas curtas (guarda, ficha, pesquisa); vazio usa o chat_model.
     utility_model: str = ""
     active: bool = False
+
+
+# A quem pertence uma chave de API própria (ver SqlLLMCredentialsRepository).
+CredentialScope = Literal["user", "project"]

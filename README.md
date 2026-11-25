@@ -596,6 +596,7 @@ Variáveis e segredos do `rag-api`, além das dos addons:
 | `CORS_ORIGINS` | URL público do `rag-web` (ex.: `https://rag.exemplo.cv`) |
 
 - **LLM:** não há LM Studio no servidor. O fornecedor (OpenRouter, Anthropic…), a chave e os modelos escolhem-se na aplicação, em Configurações → Modelo de linguagem (ou `OPEN_ROUTER_API_KEY` até haver algo guardado). Sem LLM configurado a API arranca na mesma; o `/health` responde `degraded` mas com HTTP 200.
+- **Chaves próprias:** cada pessoa (A minha conta) e cada projeto (Definições do projeto, só o dono) pode pôr a sua chave de Anthropic, OpenRouter ou OpenAI. Quem paga cada pedido: a chave do projeto, senão a da pessoa, senão a da plataforma. As chaves ficam cifradas com `CREDENTIALS_SECRET_KEY` (sem ela, as chaves próprias ficam desligadas; não a mudes depois, ou as chaves guardadas deixam de se ler). A ficha dos documentos e o `/health` usam sempre a chave da plataforma.
 - **Workers:** a fila corre dentro da API (`INDEXING_WORKERS=1`). Um `rag-worker` à parte (`python -m backend.worker`, com `INDEXING_WORKERS=0` na API) usaria os mesmos addons.
 
 ### Construir e publicar as imagens

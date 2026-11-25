@@ -9,7 +9,7 @@ from backend.auth.permissions import CHAT_SELECT_DOCUMENT, CHAT_USE, Authenticat
 from backend.research.access import project_scope
 from backend.services.search_filters import SearchFilters
 from backend.config import get_settings
-from backend.dependencies import get_rag_pipeline
+from backend.dependencies import pipeline_for
 from backend.models import AskRequest, AskResponse
 from backend.services.rag_pipeline import SYSTEM_PROMPT
 
@@ -36,7 +36,8 @@ def ask_question(payload: AskRequest, user: AuthenticatedUser = Depends(require(
     top_k = payload.top_k or settings.top_k
     retrieval_mode = payload.retrieval_mode or settings.retrieval_mode_default
 
-    pipeline = get_rag_pipeline()
+    # Chave do projeto (só depois de project_scope confirmar que a pessoa é membro), da pessoa ou da plataforma.
+    pipeline = pipeline_for(user.user_id, payload.project_id if scope is not None else None)
     if payload.multi_query:
         answer, sources, diagnostics, expanded = pipeline.ask_multi_query(
             question=question,
@@ -93,7 +94,8 @@ def ask_question_stream(payload: AskRequest, user: AuthenticatedUser = Depends(r
     top_k = payload.top_k or settings.top_k
     retrieval_mode = payload.retrieval_mode or settings.retrieval_mode_default
 
-    pipeline = get_rag_pipeline()
+    # Chave do projeto (só depois de project_scope confirmar que a pessoa é membro), da pessoa ou da plataforma.
+    pipeline = pipeline_for(user.user_id, payload.project_id if scope is not None else None)
 
     def stream() -> Iterator[str]:
         try:

@@ -17,15 +17,15 @@ from backend.dependencies import (
     get_document_types,
     get_export_store,
     get_extraction_store,
-    get_lmstudio_client,
     get_profile_store,
     get_rag_pipeline,
     get_registry,
     get_research_repository,
-    get_scope_guard,
     get_tool_registry,
     get_users,
     get_vector_store,
+    llm_for,
+    scope_guard_for,
 )
 from backend.models import AgentAskRequest, AgentProfileInfo
 from backend.research.access import load_project, project_scope
@@ -117,6 +117,8 @@ class GuardScope:
 
     document_names: list[str]
     project: str | None = None
+    # Projeto já verificado (a pessoa é membro), para a guarda usar a mesma chave que o agente.
+    project_id: str | None = None
 
 
 def _build_runner(payload: AgentAskRequest, profile: AgentProfile, user: AuthenticatedUser) -> tuple[AgentRunner, GuardScope]:
@@ -150,6 +152,7 @@ def _build_runner(payload: AgentAskRequest, profile: AgentProfile, user: Authent
         guard_scope = GuardScope(
             document_names=[d.filename for d in indexed if d.document_id in in_scope],
             project=guard_project_summary(project),
+            project_id=project.project_id,
         )
 
     context = ToolContext(
@@ -170,7 +173,8 @@ def _build_runner(payload: AgentAskRequest, profile: AgentProfile, user: Authent
     if workspace is not None:
         tools = [*tools, *PROJECT_TOOLS]
     runner = AgentRunner(
-        llm=get_lmstudio_client(),
+        # Com a chave do projeto, da pessoa ou da plataforma (ver choose_llm).
+        llm=llm_for(user.user_id, guard_scope.project_id),
         tools=tools,
         system_prompt=profile.system_prompt(scope_note, settings.knowledge_base_description, in_project=workspace is not None),
         context=context,
@@ -201,7 +205,7 @@ def ask_agent_stream(payload: AgentAskRequest, user: AuthenticatedUser = Depends
     def stream() -> Iterator[str]:
         try:
             if guard_enabled:
-                decision = get_scope_guard().check(
+                decision = scope_guard_for(user.user_id, guard_scope.project_id).check(
                     question,
                     history,
                     document_names=guard_scope.document_names,

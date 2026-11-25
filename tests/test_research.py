@@ -302,6 +302,11 @@ def test_overlap_alert_for_a_very_similar_text(base):
 # ---------------------------------------------------------------- API
 
 
+class _NoCredentials:
+    def delete(self, scope, owner_id):
+        return False
+
+
 @pytest.fixture
 def api(base, tmp_path, monkeypatch):
     users = SqlUserRepository(base["engine"])
@@ -324,6 +329,9 @@ def api(base, tmp_path, monkeypatch):
         "get_lmstudio_client": lambda: llm,
         "get_settings": lambda: settings,
         "get_rag_pipeline": lambda: base["pipeline"],
+        "llm_for": lambda *args, **kwargs: llm,
+        "pipeline_for": lambda *args, **kwargs: base["pipeline"],
+        "get_llm_credentials": lambda: _NoCredentials(),
         "research_context": lambda user, scope=None: ToolContext(**{**vars(base["ctx"]), "scope_document_ids": scope}),
     }
     for module in (access, research_api, projects_api, feedback_api, chat_api):

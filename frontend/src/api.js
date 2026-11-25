@@ -390,6 +390,21 @@ export function testLlmProvider(provider, body) {
   return jsonRequest(`/settings/llm/${provider}/test`, "POST", body, "Falha ao testar o modelo de linguagem");
 }
 
+// Chaves de API próprias (a da pessoa e a de cada projeto). Nunca voltam completas.
+// Quem paga um pedido: chave do projeto, senão a da pessoa, senão a da plataforma.
+function ownKeyApi(base) {
+  return {
+    get: () => jsonRequest(base, "GET", undefined, "Falha ao carregar a chave de API"),
+    // api_key: null mantém a chave guardada.
+    save: (body) => jsonRequest(base, "PUT", body, "Falha ao guardar a chave de API"),
+    remove: () => jsonRequest(base, "DELETE", undefined, "Falha ao remover a chave de API"),
+    test: (body) => jsonRequest(`${base}/test`, "POST", body, "Falha ao testar a chave de API"),
+  };
+}
+
+export const myLlmKey = ownKeyApi("/me/llm-key");
+export const projectLlmKey = (projectId) => ownKeyApi(`/research/projects/${projectId}/llm-key`);
+
 export function getSettings() {
   return jsonRequest("/settings", "GET", undefined, "Falha ao carregar as configurações");
 }

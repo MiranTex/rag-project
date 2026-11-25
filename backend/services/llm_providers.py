@@ -4,7 +4,10 @@ Todos falam o formato OpenAI (/chat/completions), por isso o mesmo cliente serve
 chave, os nomes dos modelos e alguns headers. A configuração ativa é lida da base de dados a cada pedido, por
 isso trocar de fornecedor ou de chave vale logo, também nos workers que correm noutro processo.
 
-Sem nada guardado, vale o .env (OPEN_ROUTER_API_KEY / LM_STUDIO_*), como antes."""
+Sem nada guardado, vale o .env (OPEN_ROUTER_API_KEY / LM_STUDIO_*), como antes.
+
+Além da configuração da plataforma, um projeto ou um utilizador pode ter a sua própria chave (choose_llm decide
+qual paga cada pedido)."""
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -119,6 +122,34 @@ def env_fallback(settings: Settings) -> LLMProviderConfig:
 
 
 Role = Literal["chat", "utility"]
+
+# Fornecedores aceites nas chaves próprias (de utilizadores e projetos): só os de URL fixo. Um URL à escolha
+# deixaria qualquer pessoa pôr o servidor a fazer pedidos para a rede interna (SSRF) e ver a resposta no erro.
+OWN_KEY_PROVIDERS = ("anthropic", "openrouter", "openai")
+
+LLMSource = Literal["project", "user", "platform"]
+
+
+@dataclass(frozen=True)
+class LLMChoice:
+    config: LLMProviderConfig
+    source: LLMSource
+
+
+def choose_llm(
+    project: LLMProviderConfig | None,
+    user: LLMProviderConfig | None,
+    platform: Callable[[], LLMProviderConfig],
+) -> LLMChoice:
+    """Quem paga um pedido: o projeto (se tem chave própria), senão a pessoa (se tem), senão a plataforma.
+
+    A do projeto ganha à da pessoa porque é uma decisão da equipa: quem a pôs quer que o trabalho do projeto vá
+    para essa conta. A chave da pessoa serve para não gastar a da plataforma. Uma chave guardada que já não se
+    consegue ler (CREDENTIALS_SECRET_KEY mudou) conta como inexistente."""
+    for source, config in (("project", project), ("user", user)):
+        if config is not None and config.api_key:
+            return LLMChoice(config.model_copy(update={"base_url": ""}), source)
+    return LLMChoice(platform(), "platform")
 
 
 def build_client(config: LLMProviderConfig, role: Role = "chat") -> LMStudioClient:

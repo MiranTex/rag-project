@@ -25,7 +25,8 @@ from sqlalchemy import (
     update,
 )
 
-from backend.models import DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
+from backend.models import CredentialScope, DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
+from backend.services.secret_box import SecretBox
 
 metadata_obj = MetaData()
 
@@ -120,6 +121,19 @@ llm_providers = Table(
     Column("chat_model", String(255), nullable=False, default=""),
     Column("utility_model", String(255), nullable=False, default=""),
     Column("active", Boolean, nullable=False, default=False),
+    Column("updated_at", String(40), nullable=False),
+)
+
+llm_credentials = Table(
+    "llm_credentials",
+    metadata_obj,
+    Column("scope", String(16), primary_key=True),
+    Column("owner_id", String(64), primary_key=True),
+    Column("provider", String(32), nullable=False),
+    Column("api_key_encrypted", Text, nullable=False, default=""),
+    Column("chat_model", String(255), nullable=False, default=""),
+    Column("utility_model", String(255), nullable=False, default=""),
+    Column("updated_by", String(64), nullable=False, default=""),
     Column("updated_at", String(40), nullable=False),
 )
 
@@ -416,3 +430,48 @@ class SqlLLMSettingsRepository:
             result = conn.execute(update(llm_providers).where(llm_providers.c.provider == config.provider).values(**values))
             if result.rowcount == 0:
                 conn.execute(insert(llm_providers).values(**values))
+
+
+class SqlLLMCredentialsRepository:
+    """Chaves de API próprias de utilizadores e projetos. A chave é cifrada aqui, ao guardar, e decifrada ao ler:
+    fora deste repositório nunca anda cifrada, e na base de dados nunca anda em claro."""
+
+    def __init__(self, engine: Engine, box: SecretBox) -> None:
+        self.engine = engine
+        self.box = box
+
+    def get(self, scope: CredentialScope, owner_id: str) -> LLMProviderConfig | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(llm_credentials).where(llm_credentials.c.scope == scope, llm_credentials.c.owner_id == owner_id)
+            ).first()
+        if row is None:
+            return None
+        return LLMProviderConfig(
+            provider=row.provider,
+            api_key=self.box.decrypt(row.api_key_encrypted),
+            chat_model=row.chat_model,
+            utility_model=row.utility_model,
+            active=True,
+        )
+
+    def save(self, scope: CredentialScope, owner_id: str, config: LLMProviderConfig, updated_by: str) -> None:
+        values = {
+            "provider": config.provider,
+            "api_key_encrypted": self.box.encrypt(config.api_key),
+            "chat_model": config.chat_model,
+            "utility_model": config.utility_model,
+            "updated_by": updated_by,
+            "updated_at": _now(),
+        }
+        key = (llm_credentials.c.scope == scope, llm_credentials.c.owner_id == owner_id)
+        with self.engine.begin() as conn:
+            if conn.execute(update(llm_credentials).where(*key).values(**values)).rowcount == 0:
+                conn.execute(insert(llm_credentials).values(scope=scope, owner_id=owner_id, **values))
+
+    def delete(self, scope: CredentialScope, owner_id: str) -> bool:
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                delete(llm_credentials).where(llm_credentials.c.scope == scope, llm_credentials.c.owner_id == owner_id)
+            )
+        return result.rowcount > 0

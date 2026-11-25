@@ -6,7 +6,7 @@ tests/test_job_queue.py)."""
 
 from typing import Any, Protocol
 
-from backend.models import DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
+from backend.models import CredentialScope, DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
 from backend.research.models import (
     AnswerFeedback,
     Comment,
@@ -206,3 +206,14 @@ class LLMSettingsRepository(Protocol):
     def get_active(self) -> LLMProviderConfig | None: ...
 
     def save(self, config: LLMProviderConfig) -> None: ...
+
+
+class LLMCredentialsRepository(Protocol):
+    """Chave de API própria de um utilizador ou de um projeto (no máximo uma por dono). A chave volta decifrada;
+    "" se foi cifrada com outra CREDENTIALS_SECRET_KEY."""
+
+    def get(self, scope: CredentialScope, owner_id: str) -> LLMProviderConfig | None: ...
+
+    def save(self, scope: CredentialScope, owner_id: str, config: LLMProviderConfig, updated_by: str) -> None: ...
+
+    def delete(self, scope: CredentialScope, owner_id: str) -> bool: ...
