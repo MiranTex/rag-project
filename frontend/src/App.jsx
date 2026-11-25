@@ -32,6 +32,7 @@ import SearchPage from "./pages/SearchPage";
 import SettingsPage from "./pages/SettingsPage";
 import UsersPage from "./pages/UsersPage";
 import InvitationPage from "./pages/InvitationPage";
+import OAuthConsentPage from "./pages/OAuthConsentPage";
 import ProjectPage from "./pages/project/ProjectPage";
 import { ResearchProvider } from "./research/ResearchContext";
 import { ConfirmProvider, useConfirm } from "./components/ui";
@@ -766,11 +767,16 @@ export default function App() {
       />
     );
   }
+  // Uma aplicação (claude.ai, Claude Desktop…) pede para se ligar: entra-se primeiro, e depois autoriza-se.
+  const consent = location.pathname === "/ligar/autorizar";
+  if (consent && session) {
+    return <OAuthConsentPage requestId={new URLSearchParams(location.search).get("pedido")} session={session} />;
+  }
   if (!session) {
     return (
       <Login
         mode={authConfig.mode}
-        message={loginMessage}
+        message={consent ? "Entra para autorizar a aplicação que pediu acesso." : loginMessage}
         onLoggedIn={(info) => {
           setLoginMessage("");
           setSession(info);

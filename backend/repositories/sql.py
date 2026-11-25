@@ -25,7 +25,7 @@ from sqlalchemy import (
     update,
 )
 
-from backend.models import AccessToken, CredentialScope, DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
+from backend.models import AccessToken, CredentialScope, OAuthGrant, OAuthTokenRecord, DocumentInfo, DocumentMetadata, Job, LLMProviderConfig, ReviewPage, User
 from backend.services.secret_box import SecretBox
 
 metadata_obj = MetaData()
@@ -135,6 +135,38 @@ access_tokens = Table(
     Column("scopes", String(120), nullable=False, default="read"),
     Column("created_at", String(40), nullable=False),
     Column("last_used_at", String(40), nullable=True),
+)
+
+oauth_clients = Table(
+    "oauth_clients",
+    metadata_obj,
+    Column("client_id", String(64), primary_key=True),
+    Column("info", JSON, nullable=False),
+    Column("created_at", String(40), nullable=False),
+)
+
+oauth_grants = Table(
+    "oauth_grants",
+    metadata_obj,
+    Column("grant_id", String(64), primary_key=True),
+    Column("user_id", String(64), nullable=False, index=True),
+    Column("client_id", String(64), nullable=False),
+    Column("scopes", String(120), nullable=False),
+    Column("created_at", String(40), nullable=False),
+    Column("last_used_at", String(40), nullable=True),
+)
+
+oauth_tokens = Table(
+    "oauth_tokens",
+    metadata_obj,
+    Column("token_hash", String(64), primary_key=True),
+    Column("kind", String(16), nullable=False),
+    Column("grant_id", String(64), nullable=True, index=True),
+    Column("client_id", String(64), nullable=False),
+    Column("user_id", String(64), nullable=True),
+    Column("scopes", String(120), nullable=False, default=""),
+    Column("expires_at", Float, nullable=False),
+    Column("data", JSON, nullable=False),
 )
 
 llm_credentials = Table(
@@ -524,3 +556,84 @@ class SqlAccessTokenRepository:
                 delete(access_tokens).where(access_tokens.c.token_id == token_id, access_tokens.c.user_id == user_id)
             )
         return result.rowcount > 0
+
+
+class SqlOAuthRepository:
+    """Clientes, autorizações e tokens do OAuth do servidor MCP. Os tokens chegam aqui já em hash."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    # ---- Clientes (registo dinâmico) ----
+
+    def save_client(self, client_id: str, info: dict) -> None:
+        with self.engine.begin() as conn:
+            if conn.execute(update(oauth_clients).where(oauth_clients.c.client_id == client_id).values(info=info)).rowcount == 0:
+                conn.execute(insert(oauth_clients).values(client_id=client_id, info=info, created_at=_now()))
+
+    def get_client(self, client_id: str) -> dict | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(select(oauth_clients.c.info).where(oauth_clients.c.client_id == client_id)).first()
+        return dict(row.info) if row else None
+
+    # ---- Autorizações ----
+
+    def save_grant(self, grant: OAuthGrant) -> None:
+        values = grant.model_dump()
+        with self.engine.begin() as conn:
+            if conn.execute(update(oauth_grants).where(oauth_grants.c.grant_id == grant.grant_id).values(**values)).rowcount == 0:
+                conn.execute(insert(oauth_grants).values(**values))
+
+    def get_grant(self, grant_id: str) -> OAuthGrant | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(select(oauth_grants).where(oauth_grants.c.grant_id == grant_id)).first()
+        return OAuthGrant(**row._mapping) if row else None
+
+    def find_grant(self, user_id: str, client_id: str) -> OAuthGrant | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(oauth_grants).where(oauth_grants.c.user_id == user_id, oauth_grants.c.client_id == client_id)
+            ).first()
+        return OAuthGrant(**row._mapping) if row else None
+
+    def list_grants(self, user_id: str) -> list[OAuthGrant]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(oauth_grants).where(oauth_grants.c.user_id == user_id).order_by(oauth_grants.c.created_at.desc())
+            )
+            return [OAuthGrant(**row._mapping) for row in rows]
+
+    def touch_grant(self, grant_id: str, when: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(update(oauth_grants).where(oauth_grants.c.grant_id == grant_id).values(last_used_at=when))
+
+    def delete_grant(self, user_id: str, grant_id: str) -> bool:
+        """Revoga a autorização e todos os tokens que dela saíram."""
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                delete(oauth_grants).where(oauth_grants.c.grant_id == grant_id, oauth_grants.c.user_id == user_id)
+            )
+            if result.rowcount:
+                conn.execute(delete(oauth_tokens).where(oauth_tokens.c.grant_id == grant_id))
+        return result.rowcount > 0
+
+    # ---- Tokens ----
+
+    def save_token(self, record: OAuthTokenRecord) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(insert(oauth_tokens).values(**record.model_dump()))
+
+    def get_token(self, token_hash: str, kind: str) -> OAuthTokenRecord | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(oauth_tokens).where(oauth_tokens.c.token_hash == token_hash, oauth_tokens.c.kind == kind)
+            ).first()
+        return OAuthTokenRecord(**row._mapping) if row else None
+
+    def delete_token(self, token_hash: str) -> bool:
+        with self.engine.begin() as conn:
+            return conn.execute(delete(oauth_tokens).where(oauth_tokens.c.token_hash == token_hash)).rowcount > 0
+
+    def delete_expired(self, now: float) -> int:
+        with self.engine.begin() as conn:
+            return conn.execute(delete(oauth_tokens).where(oauth_tokens.c.expires_at < now)).rowcount

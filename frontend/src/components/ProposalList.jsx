@@ -45,9 +45,11 @@ function Proposal({ proposal, projectId, canApply, question, onDecided }) {
     setBusy(true);
     setError("");
     try {
-      const basis = proposal.basis;
-      if (isNew) await research.addItem(projectId, { kind: "note", ...changes, source: { origin: "chat", question, ...(basis && { basis }) } });
-      else await research.updateItem(projectId, proposal.item_id, { ...changes, ...(basis && { basis }) });
+      const { basis, via } = proposal;
+      // via: a proposta veio de um agente externo (MCP); fica na entrada para se saber de onde veio.
+      const origin = { ...(basis && { basis }), ...(via && { via }) };
+      if (isNew) await research.addItem(projectId, { kind: "note", ...changes, source: { origin: via ? "mcp" : "chat", question, ...origin } });
+      else await research.updateItem(projectId, proposal.item_id, { ...changes, ...origin });
       onDecided("accepted");
     } catch (err) {
       setError(err.message);
@@ -78,6 +80,11 @@ function Proposal({ proposal, projectId, canApply, question, onDecided }) {
             {basis && (
               <Badge tone={basis.tone} title={basis.title}>
                 {basis.label}
+              </Badge>
+            )}
+            {proposal.via && (
+              <Badge tone="outline" title="Proposta feita por um agente externo ligado por MCP">
+                via {proposal.via}
               </Badge>
             )}
           </div>

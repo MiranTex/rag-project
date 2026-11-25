@@ -113,6 +113,8 @@ class Comment(BaseModel):
     author_id: str
     text: str
     created_at: str
+    # Escrito por um agente externo (MCP) em nome do autor: o nome do token. Vazio se veio da interface.
+    via: str = ""
 
 
 class SavedSearch(BaseModel):
@@ -229,6 +231,8 @@ class ItemUpdate(BaseModel):
     fields: dict[str, Any] | None = None
     # Origem do conteúdo novo (proposta do agente aceite): documents, assistant ou mixed; fica em source.basis.
     basis: Literal["documents", "assistant", "mixed"] | None = None
+    # Proposta de um agente externo (MCP) aceite: o nome do token; fica em source.via.
+    via: str | None = Field(default=None, max_length=120)
 
 
 # ---- Projeto a partir de uma conversa do chat ----

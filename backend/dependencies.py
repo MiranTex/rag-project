@@ -10,6 +10,7 @@ from backend.agent.tools import ToolRegistry, build_registry
 from backend.config import get_env_settings, get_settings, install_settings_source, on_settings_change
 from backend.repositories.contracts import (
     AccessTokenRepository,
+    OAuthRepository,
     DocumentRepository,
     ExtractionRepository,
     FeedbackRepository,
@@ -25,6 +26,7 @@ from backend.repositories.database import upgrade_database
 from backend.repositories.legacy_import import import_legacy_json
 from backend.repositories.sql import (
     SqlAccessTokenRepository,
+    SqlOAuthRepository,
     SqlDocumentRepository,
     SqlExtractionRepository,
     SqlJobQueue,
@@ -76,6 +78,28 @@ def get_users() -> UserRepository:
 @lru_cache(maxsize=1)
 def get_access_tokens() -> AccessTokenRepository:
     return SqlAccessTokenRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_oauth_repository() -> OAuthRepository:
+    return SqlOAuthRepository(get_database())
+
+
+def oauth_urls() -> tuple[str, str]:
+    """(URL público da API, URL público da interface); OAuth só fica ligado com os dois."""
+    settings = get_env_settings()
+    return settings.public_api_url.rstrip("/"), settings.public_app_url.rstrip("/")
+
+
+@lru_cache(maxsize=1)
+def get_oauth_provider():
+    """Servidor de autorização OAuth do MCP, ou None se PUBLIC_API_URL / PUBLIC_APP_URL não estiverem definidos."""
+    from backend.auth.oauth import OAuthProvider
+
+    api_url, app_url = oauth_urls()
+    if not (api_url and app_url):
+        return None
+    return OAuthProvider(get_oauth_repository, get_users, app_url)
 
 
 @lru_cache(maxsize=1)

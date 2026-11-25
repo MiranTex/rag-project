@@ -211,6 +211,11 @@ function Item({ item, projectId, structure, canEdit, currentUserId, isOwner, onE
                 {basis.label}
               </Badge>
             )}
+            {source.via && (
+              <Badge tone="outline" title="Proposta por um agente externo (MCP) e aceite pela equipa">
+                via {source.via}
+              </Badge>
+            )}
             <StatusControl
               item={item}
               statuses={structure.statuses}

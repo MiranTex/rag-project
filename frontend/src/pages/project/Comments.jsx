@@ -51,6 +51,7 @@ export default function Comments({ projectId, itemId = null, currentUserId, isOw
                   <span className="font-medium">{c.author}</span>{" "}
                   <span className="text-xs text-stone-500 dark:text-stone-400">
                     {new Date(c.created_at).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" })}
+                    {c.via && ` · via ${c.via}`}
                   </span>
                 </p>
                 <p className="whitespace-pre-line text-stone-700 dark:text-stone-300">{c.text}</p>

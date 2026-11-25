@@ -722,6 +722,9 @@ def test_proposals_carry_the_basis_of_their_content(api, base):
     item = client.post(f"/research/projects/{pid}/items", json={"title": "T", "source": {"origin": "chat", "question": "q"}}).json()
     updated = client.patch(f"/research/projects/{pid}/items/{item['item_id']}", json={"text": "novo", "basis": "mixed"}).json()
     assert updated["source"] == {"origin": "chat", "question": "q", "basis": "mixed"}
+    # Proposta de um agente externo (MCP) aceite: o nome do token fica também no source.
+    updated = client.patch(f"/research/projects/{pid}/items/{item['item_id']}", json={"text": "outro", "basis": "documents", "via": "Claude Code"}).json()
+    assert updated["source"] == {"origin": "chat", "question": "q", "basis": "documents", "via": "Claude Code"}
     assert client.patch(f"/research/projects/{pid}/items/{item['item_id']}", json={"basis": "inventada"}).status_code == 422
 
 

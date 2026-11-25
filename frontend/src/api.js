@@ -408,8 +408,18 @@ export const projectLlmKey = (projectId) => ownKeyApi(`/research/projects/${proj
 // Tokens pessoais para ligar agentes externos (Claude Code, Codex) ao servidor MCP. O token só vem ao criar.
 export const accessTokens = {
   list: () => jsonRequest("/me/tokens", "GET", undefined, "Falha ao carregar os tokens"),
-  create: (name) => jsonRequest("/me/tokens", "POST", { name }, "Falha ao criar o token"),
+  create: (name, canWrite = false) => jsonRequest("/me/tokens", "POST", { name, can_write: canWrite }, "Falha ao criar o token"),
   revoke: (id) => jsonRequest(`/me/tokens/${id}`, "DELETE", undefined, "Falha ao revogar o token"),
+};
+
+// Login OAuth do servidor MCP: a página de consentimento e as aplicações ligadas na conta.
+export const oauth = {
+  request: (id) => jsonRequest(`/oauth/requests/${encodeURIComponent(id)}`, "GET", undefined, "Falha ao abrir o pedido de autorização"),
+  approve: (id, canWrite) =>
+    jsonRequest(`/oauth/requests/${encodeURIComponent(id)}/approve`, "POST", { can_write: canWrite }, "Falha ao autorizar a aplicação"),
+  deny: (id) => jsonRequest(`/oauth/requests/${encodeURIComponent(id)}/deny`, "POST", {}, "Falha ao recusar o pedido"),
+  apps: () => jsonRequest("/me/apps", "GET", undefined, "Falha ao carregar as aplicações ligadas"),
+  revoke: (grantId) => jsonRequest(`/me/apps/${grantId}`, "DELETE", undefined, "Falha ao revogar o acesso"),
 };
 
 export function mcpUrl() {

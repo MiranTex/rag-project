@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, Plus, Trash2 } from "lucide-react";
-import { accessTokens, mcpUrl } from "../api";
-import { Button, ErrorText, Field, IconButton, inputClass, Spinner, useConfirm } from "./ui";
+import { accessTokens, mcpUrl, oauth } from "../api";
+import { Badge, Button, ErrorText, Field, IconButton, inputClass, Spinner, useConfirm } from "./ui";
 
 const formatDate = (iso) => (iso ? new Date(iso).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" }) : "nunca");
 
@@ -53,11 +53,82 @@ function Instructions({ token }) {
   );
 }
 
-// A minha conta → Ligar agentes: tokens pessoais para Claude Code, Codex e outros clientes MCP.
+// Ligar sem token: a aplicação abre esta plataforma no browser e a pessoa autoriza (OAuth). Mostra também as
+// aplicações já autorizadas, para revogar. Só aparece se o servidor tiver o login OAuth ligado.
+function ConnectedApps({ onSaved }) {
+  const confirm = useConfirm();
+  const [state, setState] = useState(null);
+  const [error, setError] = useState("");
+
+  const load = () => oauth.apps().then(setState, (err) => setError(err.message));
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function revoke(app) {
+    const ok = await confirm({
+      title: "Revogar o acesso?",
+      message: `"${app.name}" deixa de conseguir usar a tua conta. Para voltar a ligar, tens de a autorizar de novo.`,
+      confirmLabel: "Revogar",
+    });
+    if (!ok) return;
+    try {
+      await oauth.revoke(app.grant_id);
+      load();
+      onSaved?.("Acesso revogado.");
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  if (error) return <ErrorText>{error}</ErrorText>;
+  if (!state?.oauth_enabled) return null;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold">Sem token (recomendado)</h3>
+      <p className="text-sm text-stone-600 dark:text-stone-300">
+        Na aplicação, adiciona este endereço. Ela abre esta página no browser, entras com a tua conta e autorizas.
+      </p>
+      <CopyBlock label="Endereço do servidor" text={state.mcp_url} />
+      <ul className="list-disc space-y-1 pl-5 text-sm text-stone-600 dark:text-stone-300">
+        <li>
+          <strong>claude.ai ou Claude Desktop:</strong> Definições → Conectores → Adicionar conector personalizado, e cola o endereço.
+        </li>
+        <li>
+          <strong>Claude Code:</strong> <code className="text-xs">claude mcp add --transport http base-conhecimento {state.mcp_url}</code> e
+          depois <code className="text-xs">/mcp</code> para entrar.
+        </li>
+      </ul>
+      {state.apps.length > 0 && (
+        <ul className="divide-y divide-stone-200 rounded-xl border border-stone-200 dark:divide-stone-800 dark:border-stone-800">
+          {state.apps.map((app) => (
+            <li key={app.grant_id} className="flex items-center gap-3 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  <span className="truncate">{app.name}</span>
+                  <Badge tone={app.scopes.includes("write") ? "warning" : "neutral"}>{app.scopes.includes("write") ? "lê e propõe" : "só lê"}</Badge>
+                </p>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  autorizada {formatDate(app.created_at)} · último uso {formatDate(app.last_used_at)}
+                </p>
+              </div>
+              <IconButton icon={Trash2} label={`Revogar ${app.name}`} onClick={() => revoke(app)} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 className="pt-2 text-sm font-semibold">Com token (avançado)</h3>
+    </div>
+  );
+}
+
+// A minha conta → Ligar agentes: login OAuth (se ativo) e tokens pessoais para Claude Code, Codex e outros clientes MCP.
 export default function AgentConnections({ onSaved }) {
   const confirm = useConfirm();
   const [tokens, setTokens] = useState(null);
   const [name, setName] = useState("");
+  const [canWrite, setCanWrite] = useState(false);
   const [created, setCreated] = useState(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -72,9 +143,10 @@ export default function AgentConnections({ onSaved }) {
     setWorking(true);
     setError("");
     try {
-      const token = await accessTokens.create(name.trim());
+      const token = await accessTokens.create(name.trim(), canWrite);
       setCreated(token);
       setName("");
+      setCanWrite(false);
       setTokens(await accessTokens.list());
     } catch (err) {
       setError(err.message);
@@ -105,8 +177,11 @@ export default function AgentConnections({ onSaved }) {
       <p className="text-sm text-stone-500 dark:text-stone-400">
         Liga o teu Claude Code, Codex ou outro agente compatível com MCP à base de conhecimento e aos teus projetos. O agente
         pesquisa e lê os documentos com as tuas permissões, e é o teu agente que pensa e escreve: não gasta a chave da plataforma.
-        Por agora o acesso é só de leitura.
+        Por defeito só lê; com escrita, o agente pode também propor alterações ao caderno (que alguém da equipa aceita ou
+        rejeita) e comentar, sempre assinado com o nome da aplicação ou do token.
       </p>
+
+      <ConnectedApps onSaved={onSaved} />
 
       <form onSubmit={create} className="flex flex-wrap items-end gap-2">
         <Field label="Nome do token" className="min-w-0 flex-1">
@@ -122,6 +197,10 @@ export default function AgentConnections({ onSaved }) {
         <Button type="submit" variant="primary" icon={Plus} busy={working} disabled={!name.trim()}>
           Criar token
         </Button>
+        <label className="flex w-full items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+          <input type="checkbox" checked={canWrite} onChange={(e) => setCanWrite(e.target.checked)} disabled={working} />
+          Pode propor alterações ao caderno e comentar nos projetos
+        </label>
       </form>
 
       {created && <Instructions token={created.token} />}
@@ -132,7 +211,10 @@ export default function AgentConnections({ onSaved }) {
           {tokens.map((t) => (
             <li key={t.token_id} className="flex items-center gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{t.name}</p>
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  <span className="truncate">{t.name}</span>
+                  <Badge tone={t.scopes.includes("write") ? "warning" : "neutral"}>{t.scopes.includes("write") ? "lê e propõe" : "só lê"}</Badge>
+                </p>
                 <p className="text-xs text-stone-500 dark:text-stone-400">
                   <span className="font-mono">{t.prefix}…</span> · criado {formatDate(t.created_at)} · último uso {formatDate(t.last_used_at)}
                 </p>

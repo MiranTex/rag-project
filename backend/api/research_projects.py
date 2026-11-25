@@ -476,8 +476,9 @@ def update_item(project_id: str, item_id: str, payload: ItemUpdate, user: Authen
     project, _ = load_project(project_id, user, "editor")
     item = _project_item(project_id, item_id)
     changes = payload.model_dump(exclude_none=True)
-    if "basis" in changes:
-        changes["source"] = {**item.source, "basis": changes.pop("basis")}
+    source_updates = {key: changes.pop(key) for key in ("basis", "via") if key in changes}
+    if source_updates:
+        changes["source"] = {**item.source, **source_updates}
     _check_item_fields(project, changes.get("section"), changes.get("status"))
     if "tags" in changes:
         changes["tags"] = _clean_tags(changes["tags"])

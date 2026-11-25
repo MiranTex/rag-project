@@ -23,8 +23,9 @@ from backend.api.settings import router as settings_router
 from backend.api.users import router as users_router
 from backend.auth.authenticators import ensure_bootstrap_admin
 from backend.config import get_settings
-from backend.dependencies import get_authenticator, get_job_queue, get_users, install_settings_overrides
-from backend.mcp_server.server import build_mcp
+from backend.api.oauth_consent import router as oauth_consent_router
+from backend.dependencies import get_authenticator, get_job_queue, get_oauth_provider, get_users, install_settings_overrides, oauth_urls
+from backend.mcp_server.server import build_mcp, build_oauth_routes
 from backend.services.job_startup import recover_interrupted_jobs
 from starlette.routing import Route
 
@@ -51,11 +52,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         runner.stop()
 
 
-mcp_endpoint, mcp_manager = build_mcp()
+# Login OAuth do MCP (conectores do claude.ai, Claude Desktop…), só com PUBLIC_API_URL e PUBLIC_APP_URL.
+oauth_provider = get_oauth_provider()
+oauth_routes, resource_metadata_url = build_oauth_routes(oauth_provider, oauth_urls()[0]) if oauth_provider else ([], "")
+mcp_endpoint, mcp_manager = build_mcp(oauth_provider, resource_metadata_url)
 
 app = FastAPI(title="RAG Study API", version="0.1.0", lifespan=lifespan)
 # Route com uma app ASGI (não uma função) aceita todos os métodos e responde em /mcp exatamente, sem redirecionar.
 app.router.routes.append(Route("/mcp", endpoint=mcp_endpoint))
+app.router.routes.extend(oauth_routes)
 
 # A sessão vai no cabeçalho Authorization (não em cookies), por isso não são precisas credenciais CORS.
 app.add_middleware(
@@ -72,6 +77,7 @@ app.include_router(users_router)
 app.include_router(llm_settings_router)
 app.include_router(llm_keys_router)
 app.include_router(access_tokens_router)
+app.include_router(oauth_consent_router)
 app.include_router(settings_router)
 app.include_router(research_router)
 app.include_router(research_projects_router)

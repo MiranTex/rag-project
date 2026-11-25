@@ -325,5 +325,29 @@ class AccessToken(BaseModel):
     last_used_at: str | None = None
 
 
+class OAuthGrant(BaseModel):
+    """Autorização que uma pessoa deu a uma aplicação (cliente OAuth) para usar o servidor MCP em nome dela."""
+
+    grant_id: str
+    user_id: str
+    client_id: str
+    scopes: str
+    created_at: str
+    last_used_at: str | None = None
+
+
+class OAuthTokenRecord(BaseModel):
+    """Pedido de autorização, código, token de acesso ou de renovação (guardado pelo hash)."""
+
+    token_hash: str
+    kind: Literal["request", "code", "access", "refresh"]
+    grant_id: str | None = None
+    client_id: str
+    user_id: str | None = None
+    scopes: str = ""
+    expires_at: float
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 # A quem pertence uma chave de API própria (ver SqlLLMCredentialsRepository).
 CredentialScope = Literal["user", "project"]

@@ -20,6 +20,8 @@ MAX_TOKENS = 20
 
 class TokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    # Pode propor alterações ao caderno e comentar (as propostas só entram quando alguém as aceita).
+    can_write: bool = False
 
 
 def _view(token: AccessToken) -> dict:
@@ -43,7 +45,7 @@ def create_token(payload: TokenCreate, user: AuthenticatedUser = Depends(can_con
     tokens = get_access_tokens()
     if len(tokens.list_for(user.user_id)) >= MAX_TOKENS:
         raise HTTPException(status_code=400, detail=f"Máximo de {MAX_TOKENS} tokens: revoga algum que já não uses.")
-    plain, record = issue_token(tokens, user.user_id, payload.name.strip())
+    plain, record = issue_token(tokens, user.user_id, payload.name.strip(), payload.can_write)
     return {**_view(record), "token": plain}
 
 

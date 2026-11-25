@@ -21,7 +21,12 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def issue_token(tokens: AccessTokenRepository, user_id: str, name: str) -> tuple[str, AccessToken]:
+READ = "read"
+# Propor alterações ao caderno e comentar nos projetos (nunca altera entradas sem uma pessoa aceitar).
+WRITE = "write"
+
+
+def issue_token(tokens: AccessTokenRepository, user_id: str, name: str, can_write: bool = False) -> tuple[str, AccessToken]:
     """Cria um token e devolve-o em claro (única vez) com o registo guardado."""
     plain = TOKEN_PREFIX + secrets.token_urlsafe(32)
     record = AccessToken(
@@ -30,6 +35,7 @@ def issue_token(tokens: AccessTokenRepository, user_id: str, name: str) -> tuple
         name=name,
         token_hash=hash_token(plain),
         prefix=plain[: len(TOKEN_PREFIX) + 4],
+        scopes=f"{READ} {WRITE}" if can_write else READ,
         created_at=datetime.now(UTC).isoformat(),
     )
     tokens.add(record)
